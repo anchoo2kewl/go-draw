@@ -450,6 +450,11 @@ func (d *Draw) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := os.MkdirAll(d.uploadDir, 0o755); err != nil {
+		http.Error(w, "failed to create upload directory", http.StatusInternalServerError)
+		return
+	}
+
 	name := newID() + ext
 	dst, err := os.Create(filepath.Join(d.uploadDir, name))
 	if err != nil {

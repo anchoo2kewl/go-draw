@@ -21,7 +21,6 @@ package draw
 import (
 	"fmt"
 	"net/http"
-	"os"
 
 	"github.com/anchoo2kewl/go-draw/store"
 )
@@ -56,9 +55,6 @@ func New(opts ...Option) (*Draw, error) {
 			return nil, fmt.Errorf("go-draw: failed to initialise default file store: %w", err)
 		}
 		d.store = fs
-	}
-	if err := os.MkdirAll(d.uploadDir, 0o755); err != nil {
-		return nil, fmt.Errorf("go-draw: failed to create upload directory: %w", err)
 	}
 	return d, nil
 }
