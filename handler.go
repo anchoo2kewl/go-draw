@@ -13,7 +13,10 @@ import (
 	"github.com/anchoo2kewl/go-draw/store"
 )
 
-// routes wires all HTTP endpoints onto a fresh ServeMux and returns it.
+// routes returns a single http.Handler that dispatches all draw endpoints.
+// It uses manual path matching (not http.ServeMux) so the handler is fully
+// compatible with routers that set r.SetPathValue or r.Pattern before
+// dispatching (e.g. chi v5.2+ with Go 1.22+).
 //
 // Route map (assuming basePath = "/draw"):
 //
@@ -27,25 +30,33 @@ import (
 //	POST /draw/api/new       → create drawing, return JSON {id, edit_url, view_url}
 //	GET  /draw/static/...    → embedded CSS/JS/icons
 func (d *Draw) routes() http.Handler {
-	mux := http.NewServeMux()
-
 	base := strings.TrimRight(d.basePath, "/")
 
 	// Static assets — fs.Sub strips the "static/" prefix from the embedded FS.
-	// Wrap with no-cache to ensure browsers revalidate after deploys (embed.FS
-	// has zero ModTime so http.FileServer sets no Last-Modified/ETag).
-	sub, _ := fs.Sub(staticFS, "static")
-	staticHandler := http.StripPrefix(base+"/static/", http.FileServer(http.FS(sub)))
-	mux.Handle(base+"/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-cache")
-		staticHandler.ServeHTTP(w, r)
-	}))
+	staticSub, _ := fs.Sub(staticFS, "static")
 
-	// List / index
-	mux.HandleFunc(base+"/", func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Strip the base prefix to get the remainder.
 		path := strings.TrimPrefix(r.URL.Path, base)
 		path = strings.TrimPrefix(path, "/")
+
+		// Static assets: serve directly from embedded FS.
+		// Sets Cache-Control and explicit Content-Type so that parent router
+		// middleware (e.g. SetHeader("Content-Type","application/json")) is
+		// overridden for JS/CSS files.
+		if strings.HasPrefix(path, "static/") {
+			fileName := strings.TrimPrefix(path, "static/")
+			if fileName == "" {
+				http.NotFound(w, r)
+				return
+			}
+			// Clear any Content-Type set by parent middleware (e.g. "application/json")
+			// so http.ServeFileFS can detect the correct MIME type from the extension.
+			w.Header().Del("Content-Type")
+			w.Header().Set("Cache-Control", "no-cache")
+			http.ServeFileFS(w, r, staticSub, fileName)
+			return
+		}
 
 		switch {
 		case path == "" || path == "/":
@@ -93,8 +104,6 @@ func (d *Draw) routes() http.Handler {
 			}
 		}
 	})
-
-	return mux
 }
 
 // ── List ─────────────────────────────────────────────────────────────────────
