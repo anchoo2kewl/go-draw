@@ -1,7 +1,9 @@
 package draw
 
 import (
+	"crypto/sha256"
 	"embed"
+	"fmt"
 	"html/template"
 	"math/rand"
 	"net/http"
@@ -11,6 +13,16 @@ import (
 
 //go:embed static
 var staticFS embed.FS
+
+// canvasHash is a short content-hash of canvas.js computed at init time.
+// Appended as ?v=<hash> to the script URL for cache-busting.
+var canvasHash string
+
+func init() {
+	data, _ := staticFS.ReadFile("static/canvas.js")
+	h := sha256.Sum256(data)
+	canvasHash = fmt.Sprintf("%x", h[:4])
+}
 
 // canvasTmpl inlines the drawing page. It loads canvas.js from the static
 // directory and passes the mode ("edit" | "view") and drawing id to JS.
@@ -35,16 +47,18 @@ html,body{width:100%;height:100%;overflow:hidden;background:#f4f4f5}
     basePath: {{.BasePath | js}}
   };
 </script>
-<script data-cfasync="false" src="{{.BasePath}}/static/canvas.js"></script>
+<script data-cfasync="false" src="{{.BasePath}}/static/canvas.js?v={{.Version}}"></script>
 </body>
 </html>`))
 
 func serveCanvas(w http.ResponseWriter, r *http.Request, id, basePath, mode string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
 	canvasTmpl.Execute(w, map[string]string{
 		"Mode":     mode,
 		"ID":       id,
 		"BasePath": basePath,
+		"Version":  canvasHash,
 	})
 }
 
