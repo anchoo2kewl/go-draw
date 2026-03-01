@@ -28,14 +28,14 @@ html,body{width:100%;height:100%;overflow:hidden;background:#f4f4f5}
 </head>
 <body>
 <div id="app"></div>
-<script>
+<script data-cfasync="false">
   window.GODRAW_CONFIG = {
     mode:     {{.Mode | js}},
     id:       {{.ID | js}},
     basePath: {{.BasePath | js}}
   };
 </script>
-<script src="{{.BasePath}}/static/canvas.js"></script>
+<script data-cfasync="false" src="{{.BasePath}}/static/canvas.js"></script>
 </body>
 </html>`))
 

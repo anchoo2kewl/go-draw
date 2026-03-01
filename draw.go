@@ -98,7 +98,7 @@ func (d *Draw) EmbedSnippet(id, width, height, mode string) string {
 	}
 	return fmt.Sprintf(
 		`<div class="godraw-embed" data-src="%s" data-width="%s" data-height="%s" data-base-path="%s"></div>
-<script src="%s/static/embed.js"></script>`,
+<script data-cfasync="false" src="%s/static/embed.js"></script>`,
 		src, width, height, d.basePath, d.basePath,
 	)
 }
