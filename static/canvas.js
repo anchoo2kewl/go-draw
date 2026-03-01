@@ -86,13 +86,13 @@
 
   // Build toolbar HTML (only in edit mode)
   const TOOLS = [
-    { id: "select",    icon: "\u2B21", title: "Select (V / 1)" },
-    { id: "rect",      icon: "\u25AD", title: "Rectangle (R / 2)" },
-    { id: "ellipse",   icon: "\u25EF", title: "Ellipse (E / 3)" },
-    { id: "line",      icon: "\u2571", title: "Line (L / 4)" },
-    { id: "arrow",     icon: "\u2192", title: "Arrow (A / 5)" },
-    { id: "pencil",    icon: "\u270F", title: "Pencil (P / 6)" },
-    { id: "text",      icon: "T", title: "Text (T / 7)" },
+    { id: "select",    icon: "\u2B21", title: "Select (V / 1)", num: "1" },
+    { id: "rect",      icon: "\u25AD", title: "Rectangle (R / 2)", num: "2" },
+    { id: "ellipse",   icon: "\u25EF", title: "Ellipse (E / 3)", num: "3" },
+    { id: "line",      icon: "\u2571", title: "Line (L / 4)", num: "4" },
+    { id: "arrow",     icon: "\u2192", title: "Arrow (A / 5)", num: "5" },
+    { id: "pencil",    icon: "\u270F", title: "Pencil (P / 6)", num: "6" },
+    { id: "text",      icon: "T", title: "Text (T / 7)", num: "7" },
   ];
 
   let toolbar, canvas, ctx;
@@ -118,9 +118,9 @@
       app.appendChild(topbar);
 
       toolbar = topbar.querySelector("#toolbar");
-      TOOLS.forEach((t, i) => {
+      TOOLS.forEach(t => {
         const b = el("button", { class: "tool-btn" + (t.id === activeTool ? " active" : ""), title: t.title, dataset: { tool: t.id } });
-        b.innerHTML = t.icon + `<span class="tool-num">${i + 1}</span>`;
+        b.innerHTML = t.icon + (t.num ? `<span class="tool-num">${t.num}</span>` : "");
         toolbar.appendChild(b);
       });
 
@@ -486,7 +486,7 @@
       .tool-btn { position:relative; background:none; border:none; border-radius:6px; padding:5px 10px; font-size:1rem; cursor:pointer; color:#555; transition:background .15s; }
       .tool-btn:hover { background:#e4e4e7; }
       .tool-btn.active { background:#1e1e2e; color:#fff; }
-      .tool-num { position:absolute; bottom:1px; right:2px; font-size:9px; line-height:1; opacity:0.45; pointer-events:none; }
+      .tool-num { position:absolute; bottom:0; right:1px; font-size:8px; line-height:1; opacity:0.55; pointer-events:none; font-family:monospace; }
       #topbar button { background:#f4f4f5; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:.85rem; }
       #topbar button:hover { background:#e4e4e7; }
       #btn-save { background:#1e1e2e; color:#fff; font-weight:600; }
@@ -1061,6 +1061,7 @@
     if (e.key === "a" || e.key === "A" || e.key === "5") setTool("arrow");
     if (e.key === "p" || e.key === "P" || e.key === "6") setTool("pencil");
     if (e.key === "t" || e.key === "T" || e.key === "7") setTool("text");
+    if (e.key === "0") setTool("select"); // 0 = quick back to select
     if (e.key === "Escape") { commitTextInput(); selectedIds.clear(); render(); }
     if (e.key === "F11") { e.preventDefault(); toggleFullscreen(); }
   }
