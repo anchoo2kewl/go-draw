@@ -3,10 +3,13 @@ package draw
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -61,6 +64,19 @@ func (d *Draw) routes() http.Handler {
 			return
 		}
 
+		// Uploaded images: serve from uploadDir with long cache.
+		if strings.HasPrefix(path, "uploads/") {
+			fileName := strings.TrimPrefix(path, "uploads/")
+			if fileName == "" || strings.Contains(fileName, "..") {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Del("Content-Type")
+			w.Header().Set("Cache-Control", "public, max-age=31536000")
+			http.ServeFile(w, r, filepath.Join(d.uploadDir, fileName))
+			return
+		}
+
 		switch {
 		case path == "" || path == "/":
 			d.handleList(w, r)
@@ -77,6 +93,13 @@ func (d *Draw) routes() http.Handler {
 
 		case path == "api/list":
 			d.handleAPIList(w, r)
+
+		case path == "api/upload":
+			if r.Method == http.MethodPost {
+				d.handleUpload(w, r)
+			} else {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
 
 		case strings.HasPrefix(path, "api/") && strings.HasSuffix(path, "/rename"):
 			if r.Method == http.MethodPost {
@@ -396,4 +419,53 @@ func (d *Draw) handleAPIDelete(w http.ResponseWriter, r *http.Request, id string
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+
+var allowedImageExts = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true,
+	".gif": true, ".webp": true, ".svg": true,
+}
+
+func (d *Draw) handleUpload(w http.ResponseWriter, r *http.Request) {
+	const maxUpload = 10 << 20 // 10 MB
+	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
+
+	if err := r.ParseMultipartForm(maxUpload); err != nil {
+		http.Error(w, "file too large (max 10 MB)", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "missing file field", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if !allowedImageExts[ext] {
+		http.Error(w, fmt.Sprintf("unsupported file type: %s", ext), http.StatusBadRequest)
+		return
+	}
+
+	name := newID() + ext
+	dst, err := os.Create(filepath.Join(d.uploadDir, name))
+	if err != nil {
+		http.Error(w, "failed to save file", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, file); err != nil {
+		http.Error(w, "failed to write file", http.StatusInternalServerError)
+		return
+	}
+
+	base := strings.TrimRight(d.basePath, "/")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"url": base + "/uploads/" + name,
+	})
 }

@@ -43,6 +43,23 @@
   let isDragging = false;
   let textInput = null;
 
+  // ── Eraser state ─────────────────────────────────────────────────────────
+  let eraserActive = false;
+  let erasedIds = new Set();
+  let eraserCursorPos = null;
+  const ERASER_RADIUS = 18;
+
+  // ── Image cache ─────────────────────────────────────────────────────────
+  const imageCache = new Map();
+  function getImage(src) {
+    if (imageCache.has(src)) return imageCache.get(src);
+    const img = new Image();
+    img.src = src;
+    img.onload = () => render();
+    imageCache.set(src, img);
+    return img;
+  }
+
   // ── Undo / Redo ───────────────────────────────────────────────────────────
   let undoStack = [];
   let redoStack = [];
@@ -93,6 +110,8 @@
     { id: "arrow",     icon: "\u2192", title: "Arrow (A / 5)", num: "5" },
     { id: "pencil",    icon: "\u270F", title: "Pencil (P / 6)", num: "6" },
     { id: "text",      icon: "T", title: "Text (T / 7)", num: "7" },
+    { id: "eraser",    icon: "\u232B", title: "Eraser (X / 8)", num: "8" },
+    { id: "image",     icon: "\uD83D\uDDBC", title: "Image (I / 9)", num: "9" },
   ];
 
   let toolbar, canvas, ctx;
@@ -123,6 +142,29 @@
         b.innerHTML = t.icon + (t.num ? `<span class="tool-num">${t.num}</span>` : "");
         toolbar.appendChild(b);
       });
+
+      // "More" dropdown button
+      const moreBtn = el("button", { id: "btn-more", class: "tool-btn", title: "More tools" });
+      moreBtn.innerHTML = "\u00B7\u00B7\u00B7";
+      toolbar.appendChild(moreBtn);
+
+      const moreMenu = el("div", { id: "more-menu" });
+      moreMenu.innerHTML = `
+        <button id="btn-mermaid-import">Mermaid \u2192 Draw</button>
+        <button id="btn-mermaid-export">Draw \u2192 Mermaid</button>
+      `;
+      document.body.appendChild(moreMenu);
+
+      moreBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const rect = moreBtn.getBoundingClientRect();
+        moreMenu.style.top = (rect.bottom + 4) + "px";
+        moreMenu.style.left = rect.left + "px";
+        moreMenu.classList.toggle("open");
+      });
+      document.addEventListener("click", () => moreMenu.classList.remove("open"));
+      moreMenu.querySelector("#btn-mermaid-import").addEventListener("click", () => { moreMenu.classList.remove("open"); openMermaidImport(); });
+      moreMenu.querySelector("#btn-mermaid-export").addEventListener("click", () => { moreMenu.classList.remove("open"); openMermaidExport(); });
 
       // Wire topbar controls
       topbar.querySelector("#btn-undo").addEventListener("click", undo);
@@ -533,6 +575,23 @@
       #godraw-fab button { width:36px; height:36px; border:none; border-radius:8px; background:rgba(255,255,255,0.92); color:#333; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 4px rgba(0,0,0,0.15); transition:background .15s, box-shadow .15s; }
       #godraw-fab button:hover { background:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.2); }
 
+      /* More dropdown */
+      #more-menu { position:fixed; display:none; background:#fff; border:1px solid #e0e0e0; border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,0.15); padding:4px; z-index:1000; min-width:160px; }
+      #more-menu.open { display:block; }
+      #more-menu button { display:block; width:100%; text-align:left; background:none; border:none; padding:8px 12px; font-size:.85rem; cursor:pointer; border-radius:4px; }
+      #more-menu button:hover { background:#f0f0f0; }
+
+      /* Modal */
+      .godraw-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:2000; }
+      .godraw-modal { background:#fff; border-radius:12px; padding:20px; min-width:360px; max-width:90vw; box-shadow:0 8px 32px rgba(0,0,0,0.2); }
+      .godraw-modal h3 { margin:0 0 12px; font-size:1rem; }
+      .godraw-modal textarea { width:100%; min-height:140px; font-family:monospace; font-size:.85rem; border:1px solid #ddd; border-radius:6px; padding:8px; resize:vertical; box-sizing:border-box; }
+      .godraw-modal .modal-actions { display:flex; gap:8px; margin-top:12px; justify-content:flex-end; }
+      .godraw-modal .modal-btn { padding:6px 16px; border:none; border-radius:6px; cursor:pointer; font-size:.85rem; }
+      .godraw-modal .modal-btn-primary { background:#1e1e2e; color:#fff; }
+      .godraw-modal .modal-btn-primary:hover { background:#333; }
+      .godraw-modal .modal-btn-secondary { background:#f0f0f0; color:#333; }
+
       /* Responsive: collapse sidebar */
       @media (max-width:580px) {
         #sidebar { width:48px; padding:2px 0; }
@@ -670,6 +729,18 @@
 
     ctx.restore();
 
+    // Eraser cursor — drawn in screen space
+    if (activeTool === "eraser" && eraserCursorPos) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(eraserCursorPos.cx, eraserCursorPos.cy, ERASER_RADIUS, 0, Math.PI * 2);
+      ctx.strokeStyle = "#e03131";
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.7;
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Sync sidebar with current state
     if (IS_EDIT) updateSidebar();
   }
@@ -701,6 +772,7 @@
       case "arrow":    drawArrow(ctx, el); break;
       case "pencil":   drawPencil(ctx, el); break;
       case "text":     drawText(ctx, el); break;
+      case "image":    drawImage(ctx, el); break;
     }
     ctx.restore();
   }
@@ -841,6 +913,28 @@
     lines.forEach((line, i) => ctx.fillText(line, el.x, el.y + i * (el.fontSize || 16) * 1.3));
   }
 
+  function drawImage(ctx, el) {
+    const img = getImage(el.src);
+    const w = el.w || 200, h = el.h || 150;
+    if (img.complete && img.naturalWidth) {
+      ctx.drawImage(img, el.x, el.y, w, h);
+    } else {
+      // Placeholder while loading
+      ctx.save();
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = "#999";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(el.x, el.y, w, h);
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#ccc";
+      ctx.font = "14px sans-serif";
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
+      ctx.fillText("Loading\u2026", el.x + w / 2, el.y + h / 2);
+      ctx.restore();
+    }
+  }
+
   function drawSelection(ctx, el) {
     const bb = getBBox(el);
     const pad = 6;
@@ -876,6 +970,7 @@
       case "rect":
       case "ellipse":
       case "text":
+      case "image":
         return { x: el.x, y: el.y, w: el.w || 0, h: el.h || 0 };
       case "line":
       case "arrow": {
@@ -899,7 +994,8 @@
     switch (el.type) {
       case "rect":
       case "ellipse":
-      case "text": {
+      case "text":
+      case "image": {
         const x0 = Math.min(el.x, el.x + el.w), y0 = Math.min(el.y, el.y + el.h);
         const x1 = x0 + Math.abs(el.w), y1 = y0 + Math.abs(el.h);
         return wx >= x0 - pad && wx <= x1 + pad && wy >= y0 - pad && wy <= y1 + pad;
@@ -978,6 +1074,58 @@
       return;
     }
 
+    if (activeTool === "eraser") {
+      snapshot();
+      eraserActive = true;
+      erasedIds = new Set();
+      // Erase anything under the cursor
+      const hit = scene.elements.find(el => hitTest(el, wx, wy));
+      if (hit) {
+        erasedIds.add(hit.id);
+        scene.elements = scene.elements.filter(el => el.id !== hit.id);
+      }
+      render();
+      return;
+    }
+
+    if (activeTool === "image") {
+      const clickX = wx, clickY = wy;
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "image/*";
+      input.onchange = async () => {
+        if (!input.files || !input.files[0]) return;
+        const fd = new FormData();
+        fd.append("file", input.files[0]);
+        try {
+          const res = await fetch(`${CFG.basePath}/api/upload`, { method: "POST", body: fd });
+          if (!res.ok) throw new Error(await res.text());
+          const data = await res.json();
+          snapshot();
+          const img = getImage(data.url);
+          const imgEl = {
+            id: uid(), type: "image",
+            x: clickX, y: clickY,
+            w: 200, h: 150,
+            src: data.url,
+            opacity: 100,
+          };
+          // Try to use natural dimensions once loaded
+          if (img.complete && img.naturalWidth) {
+            imgEl.w = Math.min(img.naturalWidth, 400);
+            imgEl.h = imgEl.w * (img.naturalHeight / img.naturalWidth);
+          }
+          scene.elements.push(imgEl);
+          selectedIds = new Set([imgEl.id]);
+          render();
+        } catch (err) {
+          console.error("go-draw: upload failed", err);
+        }
+      };
+      input.click();
+      return;
+    }
+
     if (activeTool === "text") {
       commitTextInput();
       startTextInput(wx, wy);
@@ -1003,6 +1151,20 @@
     const { cx, cy } = getMousePos(e);
     const { x: wx, y: wy } = canvasToWorld(cx, cy);
 
+    // Track eraser cursor position for visual feedback
+    if (activeTool === "eraser") {
+      eraserCursorPos = { cx, cy };
+      if (eraserActive) {
+        const hit = scene.elements.find(el => hitTest(el, wx, wy));
+        if (hit && !erasedIds.has(hit.id)) {
+          erasedIds.add(hit.id);
+          scene.elements = scene.elements.filter(el => el.id !== hit.id);
+        }
+      }
+      render();
+      return;
+    }
+
     if (isDragging && selectedIds.size) {
       const dx = wx - startX, dy = wy - startY;
       for (const el of scene.elements) {
@@ -1024,13 +1186,14 @@
   }
 
   function onMouseUp(e) {
-    if (panning) { panning = false; canvas.style.cursor = IS_EDIT ? "crosshair" : "grab"; return; }
+    if (panning) { panning = false; canvas.style.cursor = activeTool === "eraser" ? "none" : (IS_EDIT ? "crosshair" : "grab"); return; }
+    if (eraserActive) { eraserActive = false; erasedIds = new Set(); return; }
     if (isDragging) { isDragging = false; snapshot(); return; }
     if (!drawing) return;
     drawing = false;
     if (currentEl) {
       const bb = getBBox(currentEl);
-      const tooSmall = bb.w < 3 && bb.h < 3 && currentEl.type !== "pencil";
+      const tooSmall = bb.w < 3 && bb.h < 3 && currentEl.type !== "pencil" && currentEl.type !== "image";
       if (!tooSmall) {
         snapshot();
         scene.elements.push(currentEl);
@@ -1061,6 +1224,8 @@
     if (e.key === "a" || e.key === "A" || e.key === "5") setTool("arrow");
     if (e.key === "p" || e.key === "P" || e.key === "6") setTool("pencil");
     if (e.key === "t" || e.key === "T" || e.key === "7") setTool("text");
+    if (e.key === "x" || e.key === "X" || e.key === "8") setTool("eraser");
+    if (e.key === "i" || e.key === "I" || e.key === "9") setTool("image");
     if (e.key === "0") setTool("select"); // 0 = quick back to select
     if (e.key === "Escape") { commitTextInput(); selectedIds.clear(); render(); }
     if (e.key === "F11") { e.preventDefault(); toggleFullscreen(); }
@@ -1164,7 +1329,14 @@
     });
     commitTextInput();
     selectedIds.clear();
-    canvas.style.cursor = t === "select" ? "default" : "crosshair";
+    if (t === "eraser") {
+      canvas.style.cursor = "none";
+      eraserCursorPos = null;
+    } else if (t === "select") {
+      canvas.style.cursor = "default";
+    } else {
+      canvas.style.cursor = "crosshair";
+    }
     render();
   }
 
@@ -1256,6 +1428,16 @@
     if (showFont) {
       sb.querySelector("#font-size").value = String(fs);
     }
+
+    // Hide irrelevant sections for eraser/image
+    const isEraserNoSel = activeTool === "eraser" && !sel;
+    const isImageTool = activeTool === "image" || (sel && sel.type === "image");
+    const hideStrokeFill = isEraserNoSel || isImageTool;
+
+    for (const id of ["stroke-swatches", "fill-swatches", "sw-btns", "ss-btns", "rg-btns", "rn-btns"]) {
+      const section = sb.querySelector("#" + id);
+      if (section) section.closest(".sb-section").style.display = hideStrokeFill ? "none" : "";
+    }
   }
 
   // ── Layer operations ──────────────────────────────────────────────────────
@@ -1335,6 +1517,7 @@
     switch (el.type) {
       case "rect":
       case "ellipse":
+      case "image":
         el.w = wx - startX; el.h = wy - startY;
         break;
       case "line":
@@ -1346,7 +1529,7 @@
 
   function moveElement(el, dx, dy) {
     switch (el.type) {
-      case "rect": case "ellipse": case "text":
+      case "rect": case "ellipse": case "text": case "image":
         el.x += dx; el.y += dy; break;
       case "line": case "arrow":
         el.x += dx; el.y += dy; el.x2 += dx; el.y2 += dy; break;
@@ -1543,6 +1726,371 @@
       }
       return null;
     } catch (_) { return null; }
+  }
+
+  // ── Modal helpers ─────────────────────────────────────────────────────────
+  function openModal(html) {
+    const overlay = document.createElement("div");
+    overlay.className = "godraw-modal-overlay";
+    const modal = document.createElement("div");
+    modal.className = "godraw-modal";
+    modal.innerHTML = html;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(overlay); });
+    return { overlay, modal };
+  }
+
+  function closeModal(overlay) {
+    if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+  }
+
+  // ── Mermaid → Draw (Import) ──────────────────────────────────────────────
+  function openMermaidImport() {
+    const { overlay, modal } = openModal(`
+      <h3>Mermaid \u2192 Draw</h3>
+      <textarea id="mermaid-input" placeholder="Paste Mermaid syntax here\u2026\ngraph TD\n  A[Start] --> B{Check}\n  B -->|Yes| C[Done]"></textarea>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-secondary" id="mermaid-cancel">Cancel</button>
+        <button class="modal-btn modal-btn-primary" id="mermaid-go">Import</button>
+      </div>
+    `);
+    modal.querySelector("#mermaid-cancel").addEventListener("click", () => closeModal(overlay));
+    modal.querySelector("#mermaid-go").addEventListener("click", () => {
+      const src = modal.querySelector("#mermaid-input").value.trim();
+      if (!src) return;
+      const elems = parseMermaid(src);
+      if (elems.length) {
+        snapshot();
+        scene.elements.push(...elems);
+        zoomToFit();
+        render();
+      }
+      closeModal(overlay);
+    });
+    modal.querySelector("#mermaid-input").focus();
+  }
+
+  function parseMermaid(src) {
+    const lines = src.split("\n").map(l => l.trim()).filter(l => l);
+    if (!lines.length) return [];
+    const first = lines[0].toLowerCase();
+    if (first.startsWith("graph")) {
+      const dir = first.includes("lr") ? "LR" : "TD";
+      return parseMermaidFlowchart(lines.slice(1), dir);
+    }
+    if (first.startsWith("sequencediagram")) {
+      return parseMermaidSequence(lines.slice(1));
+    }
+    // Try flowchart by default
+    return parseMermaidFlowchart(lines, "TD");
+  }
+
+  function parseMermaidFlowchart(lines, dir) {
+    const NODE_W = 120, NODE_H = 50, HGAP = 40, VGAP = 60;
+    const nodes = new Map(); // id → { label, shape }
+    const edges = [];
+    const nodeColors = ["#a5d8ff", "#b2f2bb", "#ffec99", "#ffc9c9", "#d0bfff"];
+    let colorIdx = 0;
+
+    // Parse node def: A[label], A(label), A{label}, A((label))
+    function ensureNode(raw) {
+      let id = raw, label = raw, shape = "rect";
+      const m1 = raw.match(/^(\w+)\[([^\]]*)\]$/);
+      const m2 = raw.match(/^(\w+)\(([^)]*)\)$/);
+      const m3 = raw.match(/^(\w+)\{([^}]*)\}$/);
+      const m4 = raw.match(/^(\w+)\(\(([^)]*)\)\)$/);
+      if (m4) { id = m4[1]; label = m4[2]; shape = "ellipse"; }
+      else if (m1) { id = m1[1]; label = m1[2]; shape = "rect"; }
+      else if (m2) { id = m2[1]; label = m2[2]; shape = "rect"; }
+      else if (m3) { id = m3[1]; label = m3[2]; shape = "rect"; }
+      if (!nodes.has(id)) {
+        nodes.set(id, { id, label, shape, color: nodeColors[colorIdx++ % nodeColors.length] });
+      }
+      return id;
+    }
+
+    // Join all lines and split by semicolons too
+    const combined = lines.join("\n").replace(/;/g, "\n").split("\n").map(l => l.trim()).filter(l => l);
+
+    for (const line of combined) {
+      // Edge patterns: A -->|label| B, A --> B, A --- B, A -.-> B
+      const edgeMatch = line.match(/^(\S+)\s*(-->|---|-\.->)\s*(?:\|([^|]*)\|\s*)?(\S+)$/);
+      if (edgeMatch) {
+        const fromId = ensureNode(edgeMatch[1]);
+        const toId = ensureNode(edgeMatch[4]);
+        const edgeLabel = edgeMatch[3] || "";
+        const edgeType = edgeMatch[2] === "---" ? "line" : "arrow";
+        edges.push({ from: fromId, to: toId, label: edgeLabel, type: edgeType });
+        continue;
+      }
+      // Standalone node def
+      if (line.match(/^\w+[\[({]/)) {
+        ensureNode(line);
+      }
+    }
+
+    if (!nodes.size) return [];
+
+    // BFS to assign depth levels
+    const adj = new Map();
+    for (const [id] of nodes) adj.set(id, []);
+    for (const e of edges) {
+      if (adj.has(e.from)) adj.get(e.from).push(e.to);
+    }
+
+    const levels = new Map();
+    const roots = [...nodes.keys()].filter(id => !edges.some(e => e.to === id));
+    if (!roots.length) roots.push(nodes.keys().next().value);
+    const queue = roots.map(id => ({ id, level: 0 }));
+    const visited = new Set();
+    while (queue.length) {
+      const { id, level } = queue.shift();
+      if (visited.has(id)) continue;
+      visited.add(id);
+      levels.set(id, level);
+      for (const next of (adj.get(id) || [])) {
+        if (!visited.has(next)) queue.push({ id: next, level: level + 1 });
+      }
+    }
+    // Assign unvisited nodes
+    for (const [id] of nodes) {
+      if (!levels.has(id)) levels.set(id, 0);
+    }
+
+    // Group by level
+    const byLevel = new Map();
+    for (const [id, lvl] of levels) {
+      if (!byLevel.has(lvl)) byLevel.set(lvl, []);
+      byLevel.get(lvl).push(id);
+    }
+
+    // Position nodes
+    const positions = new Map();
+    const maxLevel = Math.max(...byLevel.keys());
+    for (let lvl = 0; lvl <= maxLevel; lvl++) {
+      const ids = byLevel.get(lvl) || [];
+      ids.forEach((id, i) => {
+        let x, y;
+        if (dir === "LR") {
+          x = lvl * (NODE_W + HGAP);
+          y = i * (NODE_H + VGAP) - ((ids.length - 1) * (NODE_H + VGAP)) / 2;
+        } else {
+          x = i * (NODE_W + HGAP) - ((ids.length - 1) * (NODE_W + HGAP)) / 2;
+          y = lvl * (NODE_H + VGAP);
+        }
+        positions.set(id, { x, y });
+      });
+    }
+
+    // Generate elements
+    const elems = [];
+    for (const [id, node] of nodes) {
+      const pos = positions.get(id);
+      const base = {
+        id: uid(), strokeColor: "#1e1e2e", fillColor: node.color,
+        strokeWidth: 2, strokeStyle: "solid", roughness: 0, roundness: "round", opacity: 100,
+      };
+      if (node.shape === "ellipse") {
+        elems.push({ ...base, type: "ellipse", x: pos.x, y: pos.y, w: NODE_W, h: NODE_H });
+      } else {
+        elems.push({ ...base, type: "rect", x: pos.x, y: pos.y, w: NODE_W, h: NODE_H });
+      }
+      // Label
+      elems.push({
+        id: uid(), type: "text", x: pos.x + NODE_W / 2 - node.label.length * 4,
+        y: pos.y + NODE_H / 2 - 8, w: node.label.length * 8, h: 16,
+        text: node.label, fontSize: 14, strokeColor: "#1e1e2e", opacity: 100,
+      });
+    }
+
+    // Edges
+    for (const edge of edges) {
+      const fp = positions.get(edge.from), tp = positions.get(edge.to);
+      if (!fp || !tp) continue;
+      const fx = fp.x + NODE_W / 2, fy = fp.y + NODE_H / 2;
+      const tx = tp.x + NODE_W / 2, ty = tp.y + NODE_H / 2;
+      // Clip to node boundary
+      const angle = Math.atan2(ty - fy, tx - fx);
+      const sx = fx + Math.cos(angle) * NODE_W / 2;
+      const sy = fy + Math.sin(angle) * NODE_H / 2;
+      const ex = tx - Math.cos(angle) * NODE_W / 2;
+      const ey = ty - Math.sin(angle) * NODE_H / 2;
+
+      elems.push({
+        id: uid(), type: edge.type, x: sx, y: sy, x2: ex, y2: ey,
+        strokeColor: "#1e1e2e", strokeWidth: 2, strokeStyle: "solid", roughness: 0, opacity: 100,
+      });
+      if (edge.label) {
+        elems.push({
+          id: uid(), type: "text", x: (sx + ex) / 2 - edge.label.length * 3, y: (sy + ey) / 2 - 16,
+          w: edge.label.length * 8, h: 14, text: edge.label, fontSize: 12,
+          strokeColor: "#888", opacity: 100,
+        });
+      }
+    }
+
+    return elems;
+  }
+
+  function parseMermaidSequence(lines) {
+    const PART_W = 100, PART_H = 40, HGAP = 60, MSG_VGAP = 55;
+    const participants = [];
+    const partMap = new Map();
+    const messages = [];
+
+    for (const line of lines) {
+      const pMatch = line.match(/^participant\s+(\w+)(?:\s+as\s+(.+))?$/i);
+      if (pMatch) {
+        const id = pMatch[1], name = pMatch[2] || pMatch[1];
+        if (!partMap.has(id)) {
+          partMap.set(id, { id, name, idx: participants.length });
+          participants.push({ id, name });
+        }
+        continue;
+      }
+      const mMatch = line.match(/^(\w+)\s*(->>|-->>|->|-->)\s*(\w+)\s*:\s*(.+)$/);
+      if (mMatch) {
+        const from = mMatch[1], to = mMatch[3], msg = mMatch[4].trim();
+        // Auto-create participants
+        if (!partMap.has(from)) { partMap.set(from, { id: from, name: from, idx: participants.length }); participants.push({ id: from, name: from }); }
+        if (!partMap.has(to)) { partMap.set(to, { id: to, name: to, idx: participants.length }); participants.push({ id: to, name: to }); }
+        const dashed = mMatch[2].includes("--");
+        messages.push({ from, to, msg, dashed });
+      }
+    }
+
+    if (!participants.length) return [];
+
+    const elems = [];
+    const lifelineHeight = (messages.length + 1) * MSG_VGAP + 40;
+
+    // Participant boxes
+    participants.forEach((p, i) => {
+      const x = i * (PART_W + HGAP);
+      const y = 0;
+      elems.push({
+        id: uid(), type: "rect", x, y, w: PART_W, h: PART_H,
+        strokeColor: "#1e1e2e", fillColor: "#ffec99", strokeWidth: 2,
+        strokeStyle: "solid", roughness: 0, roundness: "round", opacity: 100,
+      });
+      elems.push({
+        id: uid(), type: "text", x: x + PART_W / 2 - p.name.length * 4, y: y + 12,
+        w: p.name.length * 8, h: 16, text: p.name, fontSize: 14,
+        strokeColor: "#1e1e2e", opacity: 100,
+      });
+      // Lifeline (dashed vertical line)
+      elems.push({
+        id: uid(), type: "line",
+        x: x + PART_W / 2, y: PART_H,
+        x2: x + PART_W / 2, y2: PART_H + lifelineHeight,
+        strokeColor: "#aaa", strokeWidth: 1, strokeStyle: "dashed", roughness: 0, opacity: 100,
+      });
+    });
+
+    // Messages
+    messages.forEach((m, i) => {
+      const fromIdx = partMap.get(m.from).idx;
+      const toIdx = partMap.get(m.to).idx;
+      const y = PART_H + 30 + i * MSG_VGAP;
+      const x1 = fromIdx * (PART_W + HGAP) + PART_W / 2;
+      const x2 = toIdx * (PART_W + HGAP) + PART_W / 2;
+      elems.push({
+        id: uid(), type: "arrow", x: x1, y, x2, y2: y,
+        strokeColor: "#1e1e2e", strokeWidth: 1.5,
+        strokeStyle: m.dashed ? "dashed" : "solid", roughness: 0, opacity: 100,
+      });
+      const midX = (x1 + x2) / 2;
+      elems.push({
+        id: uid(), type: "text", x: midX - m.msg.length * 3, y: y - 18,
+        w: m.msg.length * 7, h: 14, text: m.msg, fontSize: 12,
+        strokeColor: "#555", opacity: 100,
+      });
+    });
+
+    return elems;
+  }
+
+  // ── Draw → Mermaid (Export) ──────────────────────────────────────────────
+  function openMermaidExport() {
+    const mermaidSrc = generateMermaid();
+    const { overlay, modal } = openModal(`
+      <h3>Draw \u2192 Mermaid</h3>
+      <textarea id="mermaid-output" readonly>${escHtml(mermaidSrc)}</textarea>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-secondary" id="mermaid-close">Close</button>
+        <button class="modal-btn modal-btn-primary" id="mermaid-copy">Copy</button>
+      </div>
+    `);
+    modal.querySelector("#mermaid-close").addEventListener("click", () => closeModal(overlay));
+    modal.querySelector("#mermaid-copy").addEventListener("click", () => {
+      navigator.clipboard.writeText(mermaidSrc).then(() => {
+        modal.querySelector("#mermaid-copy").textContent = "Copied!";
+        setTimeout(() => modal.querySelector("#mermaid-copy").textContent = "Copy", 1500);
+      });
+    });
+  }
+
+  function generateMermaid() {
+    const nodeEls = scene.elements.filter(e => e.type === "rect" || e.type === "ellipse");
+    const edgeEls = scene.elements.filter(e => e.type === "arrow" || e.type === "line");
+    const textEls = scene.elements.filter(e => e.type === "text");
+
+    if (!nodeEls.length) return "graph TD\n  %% No shapes found";
+
+    // Assign IDs: A, B, C...Z, A1, B1...
+    function mermaidId(i) {
+      const letter = String.fromCharCode(65 + (i % 26));
+      const suffix = i >= 26 ? Math.floor(i / 26) : "";
+      return letter + suffix;
+    }
+
+    const nodeMap = new Map();
+    nodeEls.forEach((n, i) => {
+      const mid = mermaidId(i);
+      // Find overlapping text
+      const bb = getBBox(n);
+      const label = textEls.find(t => {
+        const tb = getBBox(t);
+        return tb.x >= bb.x - 20 && tb.x <= bb.x + bb.w + 20 &&
+               tb.y >= bb.y - 20 && tb.y <= bb.y + bb.h + 20;
+      });
+      nodeMap.set(n.id, { mid, label: label ? label.text : mid, type: n.type });
+    });
+
+    let out = "graph TD\n";
+
+    // Node declarations
+    for (const [, node] of nodeMap) {
+      if (node.type === "ellipse") {
+        out += `  ${node.mid}((${node.label}))\n`;
+      } else {
+        out += `  ${node.mid}[${node.label}]\n`;
+      }
+    }
+
+    // Edges: find closest node to start/end
+    const TOL = 200;
+    for (const edge of edgeEls) {
+      let fromNode = null, toNode = null;
+      let minFrom = TOL, minTo = TOL;
+      for (const [nid, info] of nodeMap) {
+        const n = nodeEls.find(e => e.id === nid);
+        if (!n) continue;
+        const bb = getBBox(n);
+        const ncx = bb.x + bb.w / 2, ncy = bb.y + bb.h / 2;
+        const dFrom = Math.hypot(edge.x - ncx, edge.y - ncy);
+        const dTo = Math.hypot(edge.x2 - ncx, edge.y2 - ncy);
+        if (dFrom < minFrom) { minFrom = dFrom; fromNode = info; }
+        if (dTo < minTo) { minTo = dTo; toNode = info; }
+      }
+      if (fromNode && toNode && fromNode !== toNode) {
+        const arrow = edge.type === "arrow" ? "-->" : "---";
+        out += `  ${fromNode.mid} ${arrow} ${toNode.mid}\n`;
+      }
+    }
+
+    return out;
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────

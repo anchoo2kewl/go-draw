@@ -31,3 +31,11 @@ func WithMaxSceneBytes(n int64) Option {
 		d.maxSceneBytes = n
 	}
 }
+
+// WithUploadDir sets the directory where uploaded images are stored.
+// Defaults to "./draw-uploads".
+func WithUploadDir(dir string) Option {
+	return func(d *Draw) {
+		d.uploadDir = dir
+	}
+}

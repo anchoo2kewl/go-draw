@@ -21,6 +21,7 @@ package draw
 import (
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/anchoo2kewl/go-draw/store"
 )
@@ -28,12 +29,14 @@ import (
 const defaultBasePath = "/draw"
 const defaultMaxScene = int64(2 << 20) // 2 MB
 const defaultStoreDir = "./draw-data"
+const defaultUploadDir = "./draw-uploads"
 
 // Draw is the top-level object. Create one with New() and mount its Handler.
 type Draw struct {
 	store         store.Store
 	basePath      string
 	maxSceneBytes int64
+	uploadDir     string
 }
 
 // New creates a Draw instance with the provided options.
@@ -42,6 +45,7 @@ func New(opts ...Option) (*Draw, error) {
 	d := &Draw{
 		basePath:      defaultBasePath,
 		maxSceneBytes: defaultMaxScene,
+		uploadDir:     defaultUploadDir,
 	}
 	for _, o := range opts {
 		o(d)
@@ -52,6 +56,9 @@ func New(opts ...Option) (*Draw, error) {
 			return nil, fmt.Errorf("go-draw: failed to initialise default file store: %w", err)
 		}
 		d.store = fs
+	}
+	if err := os.MkdirAll(d.uploadDir, 0o755); err != nil {
+		return nil, fmt.Errorf("go-draw: failed to create upload directory: %w", err)
 	}
 	return d, nil
 }
