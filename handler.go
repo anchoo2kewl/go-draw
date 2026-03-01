@@ -32,8 +32,14 @@ func (d *Draw) routes() http.Handler {
 	base := strings.TrimRight(d.basePath, "/")
 
 	// Static assets — fs.Sub strips the "static/" prefix from the embedded FS.
+	// Wrap with no-cache to ensure browsers revalidate after deploys (embed.FS
+	// has zero ModTime so http.FileServer sets no Last-Modified/ETag).
 	sub, _ := fs.Sub(staticFS, "static")
-	mux.Handle(base+"/static/", http.StripPrefix(base+"/static/", http.FileServer(http.FS(sub))))
+	staticHandler := http.StripPrefix(base+"/static/", http.FileServer(http.FS(sub)))
+	mux.Handle(base+"/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		staticHandler.ServeHTTP(w, r)
+	}))
 
 	// List / index
 	mux.HandleFunc(base+"/", func(w http.ResponseWriter, r *http.Request) {
