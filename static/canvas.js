@@ -982,12 +982,93 @@
     }
   }
 
+  // ── Zoom to fit ────────────────────────────────────────────────────────────
+  function zoomToFit() {
+    if (!scene.elements.length) {
+      vp.x = canvas.width / 2;
+      vp.y = canvas.height / 2;
+      vp.scale = 1;
+      return;
+    }
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < scene.elements.length; i++) {
+      var bb = getBBox(scene.elements[i]);
+      if (bb.x < minX) minX = bb.x;
+      if (bb.y < minY) minY = bb.y;
+      if (bb.x + bb.w > maxX) maxX = bb.x + bb.w;
+      if (bb.y + bb.h > maxY) maxY = bb.y + bb.h;
+    }
+    var contentW = maxX - minX;
+    var contentH = maxY - minY;
+    if (contentW < 1) contentW = 1;
+    if (contentH < 1) contentH = 1;
+    var pad = 40;
+    var scaleX = (canvas.width - pad * 2) / contentW;
+    var scaleY = (canvas.height - pad * 2) / contentH;
+    vp.scale = Math.min(scaleX, scaleY, 2);
+    var cx = (minX + maxX) / 2;
+    var cy = (minY + maxY) / 2;
+    vp.x = canvas.width / 2 - cx * vp.scale;
+    vp.y = canvas.height / 2 - cy * vp.scale;
+  }
+
+  // Center on content at a given scale
+  function centerOnContent(scale) {
+    vp.scale = scale;
+    if (scene.elements.length) {
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (var i = 0; i < scene.elements.length; i++) {
+        var bb = getBBox(scene.elements[i]);
+        if (bb.x < minX) minX = bb.x;
+        if (bb.y < minY) minY = bb.y;
+        if (bb.x + bb.w > maxX) maxX = bb.x + bb.w;
+        if (bb.y + bb.h > maxY) maxY = bb.y + bb.h;
+      }
+      var cx = (minX + maxX) / 2;
+      var cy = (minY + maxY) / 2;
+      vp.x = canvas.width / 2 - cx * vp.scale;
+      vp.y = canvas.height / 2 - cy * vp.scale;
+    }
+  }
+
+  // Parse zoom query param: "fit", "1.5", "150%", "50%" etc.
+  function getZoomParam() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var z = params.get("zoom");
+      if (!z) return null;
+      if (z === "fit") return "fit";
+      if (z.endsWith("%")) z = z.slice(0, -1);
+      var n = parseFloat(z);
+      if (!isNaN(n) && n > 0) {
+        return n > 10 ? n / 100 : n;
+      }
+      return null;
+    } catch (_) { return null; }
+  }
+
   // ── Init ──────────────────────────────────────────────────────────────────
   buildUI();
 
   // Center viewport initially
   vp.x = canvas.width / 2;
   vp.y = canvas.height / 2;
+
+  var _zoomParam = getZoomParam();
+
+  // Wrap loadDrawing to apply zoom after scene loads
+  var _origLoad = loadDrawing;
+  loadDrawing = async function() {
+    await _origLoad();
+    if (!IS_EDIT) {
+      if (_zoomParam === "fit" || _zoomParam === null) {
+        zoomToFit();
+      } else if (typeof _zoomParam === "number") {
+        centerOnContent(_zoomParam);
+      }
+      render();
+    }
+  };
 
   loadDrawing();
 
