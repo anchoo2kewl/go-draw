@@ -28,6 +28,9 @@ import (
 //	POST /draw/{id}/save     → persist scene JSON
 //	POST /draw/{id}/delete   → remove drawing
 //	POST /draw/api/new       → create drawing, return JSON {id, edit_url, view_url}
+//	GET  /draw/api/list      → list all drawings as JSON
+//	POST /draw/api/{id}/rename → rename drawing, return JSON {ok: true}
+//	POST /draw/api/{id}/delete → delete drawing, return JSON {ok: true}
 //	GET  /draw/static/...    → embedded CSS/JS/icons
 func (d *Draw) routes() http.Handler {
 	base := strings.TrimRight(d.basePath, "/")
@@ -68,6 +71,27 @@ func (d *Draw) routes() http.Handler {
 		case path == "api/new":
 			if r.Method == http.MethodPost {
 				d.handleAPINew(w, r)
+			} else {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
+
+		case path == "api/list":
+			d.handleAPIList(w, r)
+
+		case strings.HasPrefix(path, "api/") && strings.HasSuffix(path, "/rename"):
+			if r.Method == http.MethodPost {
+				id := strings.TrimPrefix(path, "api/")
+				id = strings.TrimSuffix(id, "/rename")
+				d.handleAPIRename(w, r, id)
+			} else {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			}
+
+		case strings.HasPrefix(path, "api/") && strings.HasSuffix(path, "/delete"):
+			if r.Method == http.MethodPost {
+				id := strings.TrimPrefix(path, "api/")
+				id = strings.TrimSuffix(id, "/delete")
+				d.handleAPIDelete(w, r, id)
 			} else {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
@@ -307,4 +331,69 @@ func (d *Draw) handleViewer(w http.ResponseWriter, r *http.Request, id string) {
 		return
 	}
 	serveCanvas(w, r, id, d.basePath, "view")
+}
+
+// ── API List ──────────────────────────────────────────────────────────────────
+
+func (d *Draw) handleAPIList(w http.ResponseWriter, r *http.Request) {
+	drawings, err := d.store.List()
+	if err != nil {
+		http.Error(w, "failed to list drawings", http.StatusInternalServerError)
+		return
+	}
+	type item struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		UpdatedAt string `json:"updated_at"`
+	}
+	items := make([]item, len(drawings))
+	for i, d := range drawings {
+		items[i] = item{
+			ID:        d.ID,
+			Title:     d.Title,
+			UpdatedAt: d.UpdatedAt.Format(time.RFC3339),
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"drawings": items})
+}
+
+// ── API Rename ────────────────────────────────────────────────────────────────
+
+func (d *Draw) handleAPIRename(w http.ResponseWriter, r *http.Request, id string) {
+	var req struct {
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	drawing, err := d.store.Get(id)
+	if errors.Is(err, store.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "storage error", http.StatusInternalServerError)
+		return
+	}
+	drawing.Title = req.Title
+	drawing.UpdatedAt = time.Now()
+	if err := d.store.Save(drawing); err != nil {
+		http.Error(w, "save failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+// ── API Delete (JSON) ─────────────────────────────────────────────────────────
+
+func (d *Draw) handleAPIDelete(w http.ResponseWriter, r *http.Request, id string) {
+	if err := d.store.Delete(id); err != nil && !errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
