@@ -2,7 +2,7 @@
  * go-draw canvas.js
  * Pure vanilla JS canvas drawing engine.
  * Supports: select, rectangle, ellipse, line, arrow, pencil, text
- * Edit mode: full toolbar + save
+ * Edit mode: full toolbar + sidebar property panel + save
  * View mode: pan + zoom only, no editing
  * Fullscreen: toggle via button or F11, works in both modes
  */
@@ -26,6 +26,10 @@
   let fillColor = "transparent";
   let strokeWidth = 2;
   let fontSize = 16;
+  let strokeStyle = "solid";   // "solid" | "dashed" | "dotted"
+  let roughness = 0;           // 0=architect, 1=artist, 2=cartoonist
+  let roundness = "sharp";     // "sharp" | "round"
+  let opacity = 100;           // 0-100
 
   // ── Interaction state ────────────────────────────────────────────────────
   let drawing = false;
@@ -107,7 +111,6 @@
         <div class="top-right">
           <button id="btn-undo" title="Undo (Ctrl+Z)">\u21A9</button>
           <button id="btn-redo" title="Redo (Ctrl+Y)">\u21AA</button>
-          <button id="btn-delete" title="Delete selected (Del)">\uD83D\uDDD1</button>
           <button id="btn-save" title="Save (Ctrl+S)">\uD83D\uDCBE Save</button>
           <span id="save-status"></span>
         </div>
@@ -115,43 +118,15 @@
       app.appendChild(topbar);
 
       toolbar = topbar.querySelector("#toolbar");
-      TOOLS.forEach(t => {
+      TOOLS.forEach((t, i) => {
         const b = el("button", { class: "tool-btn" + (t.id === activeTool ? " active" : ""), title: t.title, dataset: { tool: t.id } });
-        b.textContent = t.icon;
+        b.innerHTML = t.icon + `<span class="tool-num">${i + 1}</span>`;
         toolbar.appendChild(b);
       });
 
-      // Color + stroke controls
-      const props = el("div", { id: "props" });
-      props.innerHTML = `
-        <label title="Stroke color"><span>Stroke</span><input type="color" id="stroke-color" value="${strokeColor}"></label>
-        <label title="Fill color"><span>Fill</span><input type="color" id="fill-color" value="#ffffff"></label>
-        <label class="fill-none-wrap" title="No fill"><input type="checkbox" id="fill-none" checked> No fill</label>
-        <label title="Stroke width"><span>Width</span>
-          <select id="stroke-width">
-            <option value="1">1</option>
-            <option value="2" selected>2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="6">6</option>
-          </select>
-        </label>
-        <label title="Font size"><span>Font</span>
-          <select id="font-size">
-            <option value="12">12</option>
-            <option value="16" selected>16</option>
-            <option value="20">20</option>
-            <option value="28">28</option>
-            <option value="36">36</option>
-          </select>
-        </label>
-      `;
-      app.appendChild(props);
-
-      // Wire prop controls
+      // Wire topbar controls
       topbar.querySelector("#btn-undo").addEventListener("click", undo);
       topbar.querySelector("#btn-redo").addEventListener("click", redo);
-      topbar.querySelector("#btn-delete").addEventListener("click", deleteSelected);
       topbar.querySelector("#btn-save").addEventListener("click", saveDrawing);
       topbar.querySelector("#title-input").addEventListener("input", e => { title = e.target.value; });
       toolbar.addEventListener("click", e => {
@@ -159,28 +134,31 @@
         if (!btn) return;
         setTool(btn.dataset.tool);
       });
-      props.querySelector("#stroke-color").addEventListener("input", e => strokeColor = e.target.value);
-      props.querySelector("#fill-none").addEventListener("change", e => {
-        fillColor = e.target.checked ? "transparent" : props.querySelector("#fill-color").value;
-        props.querySelector("#fill-color").disabled = e.target.checked;
-      });
-      props.querySelector("#fill-color").addEventListener("input", e => {
-        if (!props.querySelector("#fill-none").checked) fillColor = e.target.value;
-      });
-      props.querySelector("#stroke-width").addEventListener("change", e => strokeWidth = parseInt(e.target.value));
-      props.querySelector("#font-size").addEventListener("change", e => fontSize = parseInt(e.target.value));
+
+      // ── Main area (sidebar + canvas) ───────────────────────────────────
+      const mainArea = el("div", { id: "main-area" });
+
+      const sidebar = buildSidebar();
+      mainArea.appendChild(sidebar);
+
+      const wrap = el("div", { id: "canvas-wrap" });
+      canvas = el("canvas", { id: "canvas" });
+      wrap.appendChild(canvas);
+      mainArea.appendChild(wrap);
+      app.appendChild(mainArea);
+
+      buildFloatingBar(wrap);
+      wireSidebar();
+    } else {
+      // ── View mode: just canvas ─────────────────────────────────────────
+      const wrap = el("div", { id: "canvas-wrap" });
+      canvas = el("canvas", { id: "canvas" });
+      wrap.appendChild(canvas);
+      app.appendChild(wrap);
+      buildFloatingBar(wrap);
     }
 
-    // ── Canvas ──────────────────────────────────────────────────────────────
-    const wrap = el("div", { id: "canvas-wrap" });
-    canvas = el("canvas", { id: "canvas" });
-    wrap.appendChild(canvas);
-    app.appendChild(wrap);
     ctx = canvas.getContext("2d");
-
-    // ── Floating action bar (fullscreen + new canvas) ───────────────────────
-    buildFloatingBar(wrap);
-
     injectStyles();
     resizeCanvas();
     window.addEventListener("resize", () => { resizeCanvas(); render(); });
@@ -193,6 +171,201 @@
 
     // Listen for fullscreen changes
     document.addEventListener("fullscreenchange", onFullscreenChange);
+  }
+
+  // ── Sidebar ───────────────────────────────────────────────────────────────
+  function buildSidebar() {
+    const sb = el("div", { id: "sidebar" });
+    sb.innerHTML = `
+      <div class="sb-section">
+        <div class="sb-label">Stroke</div>
+        <div class="sb-row" id="stroke-swatches">
+          <button class="swatch" data-color="#1e1e2e" style="background:#1e1e2e" title="Black"></button>
+          <button class="swatch" data-color="#e03131" style="background:#e03131" title="Red"></button>
+          <button class="swatch" data-color="#2f9e44" style="background:#2f9e44" title="Green"></button>
+          <button class="swatch" data-color="#1971c2" style="background:#1971c2" title="Blue"></button>
+          <button class="swatch" data-color="#e8590c" style="background:#e8590c" title="Orange"></button>
+          <input type="color" id="stroke-color-picker" value="${strokeColor}" title="Custom color">
+        </div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Background</div>
+        <div class="sb-row" id="fill-swatches">
+          <button class="swatch swatch-none" data-color="transparent" title="No fill"></button>
+          <button class="swatch" data-color="#ffc9c9" style="background:#ffc9c9" title="Pink"></button>
+          <button class="swatch" data-color="#b2f2bb" style="background:#b2f2bb" title="Green"></button>
+          <button class="swatch" data-color="#a5d8ff" style="background:#a5d8ff" title="Blue"></button>
+          <button class="swatch" data-color="#ffec99" style="background:#ffec99" title="Yellow"></button>
+          <input type="color" id="fill-color-picker" value="#ffffff" title="Custom color">
+        </div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Stroke width</div>
+        <div class="sb-row" id="sw-btns">
+          <button class="sb-btn" data-prop="strokeWidth" data-val="1" title="Thin">
+            <svg width="20" height="20" viewBox="0 0 20 20"><line x1="4" y1="10" x2="16" y2="10" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+          </button>
+          <button class="sb-btn" data-prop="strokeWidth" data-val="2" title="Medium">
+            <svg width="20" height="20" viewBox="0 0 20 20"><line x1="4" y1="10" x2="16" y2="10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+          </button>
+          <button class="sb-btn" data-prop="strokeWidth" data-val="4" title="Thick">
+            <svg width="20" height="20" viewBox="0 0 20 20"><line x1="4" y1="10" x2="16" y2="10" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Stroke style</div>
+        <div class="sb-row" id="ss-btns">
+          <button class="sb-btn" data-prop="strokeStyle" data-val="solid" title="Solid">
+            <svg width="20" height="20" viewBox="0 0 20 20"><line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+          <button class="sb-btn" data-prop="strokeStyle" data-val="dashed" title="Dashed">
+            <svg width="20" height="20" viewBox="0 0 20 20"><line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="2" stroke-dasharray="4,3" stroke-linecap="round"/></svg>
+          </button>
+          <button class="sb-btn" data-prop="strokeStyle" data-val="dotted" title="Dotted">
+            <svg width="20" height="20" viewBox="0 0 20 20"><line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="2" stroke-dasharray="1.5,3" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Sloppiness</div>
+        <div class="sb-row" id="rg-btns">
+          <button class="sb-btn" data-prop="roughness" data-val="0" title="Architect">
+            <svg width="20" height="20" viewBox="0 0 20 20"><line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
+          <button class="sb-btn" data-prop="roughness" data-val="1" title="Artist">
+            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 10Q7 8 10 10Q13 12 17 10" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+          </button>
+          <button class="sb-btn" data-prop="roughness" data-val="2" title="Cartoonist">
+            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 10Q5 7 7 10Q9 13 11 10Q13 7 15 10Q16 12 17 10" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Edges</div>
+        <div class="sb-row" id="rn-btns">
+          <button class="sb-btn" data-prop="roundness" data-val="sharp" title="Sharp">
+            <svg width="20" height="20" viewBox="0 0 20 20"><rect x="4" y="5" width="12" height="10" rx="0" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+          </button>
+          <button class="sb-btn" data-prop="roundness" data-val="round" title="Round">
+            <svg width="20" height="20" viewBox="0 0 20 20"><rect x="4" y="5" width="12" height="10" rx="3" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Opacity</div>
+        <div class="sb-row">
+          <input type="range" id="opacity-slider" min="0" max="100" value="100">
+          <span id="opacity-val">100</span>
+        </div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Layers</div>
+        <div class="sb-row" id="layer-btns">
+          <button class="sb-btn sb-action" data-action="to-back" title="Send to back">
+            <svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 13l-4-4h3V3h2v6h3z" fill="currentColor"/><line x1="3" y1="14.5" x2="13" y2="14.5" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+          <button class="sb-btn sb-action" data-action="backward" title="Send backward">
+            <svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 12l-3-3h2V4h2v5h2z" fill="currentColor"/></svg>
+          </button>
+          <button class="sb-btn sb-action" data-action="forward" title="Bring forward">
+            <svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 4l3 3h-2v5H7V7H5z" fill="currentColor"/></svg>
+          </button>
+          <button class="sb-btn sb-action" data-action="to-front" title="Bring to front">
+            <svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 3l4 4h-3v6H7V7H4z" fill="currentColor"/><line x1="3" y1="1.5" x2="13" y2="1.5" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Actions</div>
+        <div class="sb-row" id="action-btns">
+          <button class="sb-btn sb-action" data-action="duplicate" title="Duplicate (Ctrl+D)">
+            <svg width="16" height="16" viewBox="0 0 16 16"><rect x="5.5" y="1" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/><rect x="2.5" y="4" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>
+          </button>
+          <button class="sb-btn sb-action" data-action="delete" title="Delete (Del)">
+            <svg width="16" height="16" viewBox="0 0 16 16"><path d="M5.5 5.5v6m3-6v6M2.5 3h11m-1.5 0l-.5 9a1.5 1.5 0 01-1.5 1.4H6a1.5 1.5 0 01-1.5-1.4L4 3m2.5 0V1.5a.5.5 0 01.5-.5h2a.5.5 0 01.5.5V3" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+          </button>
+          <button class="sb-btn sb-action" data-action="copy-link" title="Copy link">
+            <svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.354 8.854a3.5 3.5 0 004.95 0l2-2a3.5 3.5 0 00-4.95-4.95l-1 1m2.292 4.242a3.5 3.5 0 00-4.95 0l-2 2a3.5 3.5 0 004.95 4.95l1-1" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="sb-section" id="font-section" style="display:none">
+        <div class="sb-label">Font size</div>
+        <div class="sb-row">
+          <select id="font-size">
+            <option value="12">12</option>
+            <option value="16" selected>16</option>
+            <option value="20">20</option>
+            <option value="28">28</option>
+            <option value="36">36</option>
+          </select>
+        </div>
+      </div>
+    `;
+    return sb;
+  }
+
+  function wireSidebar() {
+    const sb = document.getElementById("sidebar");
+    if (!sb) return;
+
+    // Stroke swatches
+    sb.querySelectorAll("#stroke-swatches .swatch").forEach(btn => {
+      btn.addEventListener("click", () => setProp("strokeColor", btn.dataset.color));
+    });
+    sb.querySelector("#stroke-color-picker").addEventListener("input", e => setProp("strokeColor", e.target.value));
+
+    // Fill swatches
+    sb.querySelectorAll("#fill-swatches .swatch").forEach(btn => {
+      btn.addEventListener("click", () => setProp("fillColor", btn.dataset.color));
+    });
+    sb.querySelector("#fill-color-picker").addEventListener("input", e => setProp("fillColor", e.target.value));
+
+    // Stroke width
+    sb.querySelectorAll("#sw-btns .sb-btn").forEach(btn => {
+      btn.addEventListener("click", () => setProp("strokeWidth", parseInt(btn.dataset.val)));
+    });
+
+    // Stroke style
+    sb.querySelectorAll("#ss-btns .sb-btn").forEach(btn => {
+      btn.addEventListener("click", () => setProp("strokeStyle", btn.dataset.val));
+    });
+
+    // Roughness
+    sb.querySelectorAll("#rg-btns .sb-btn").forEach(btn => {
+      btn.addEventListener("click", () => setProp("roughness", parseInt(btn.dataset.val)));
+    });
+
+    // Roundness
+    sb.querySelectorAll("#rn-btns .sb-btn").forEach(btn => {
+      btn.addEventListener("click", () => setProp("roundness", btn.dataset.val));
+    });
+
+    // Opacity
+    sb.querySelector("#opacity-slider").addEventListener("input", e => {
+      sb.querySelector("#opacity-val").textContent = e.target.value;
+      setProp("opacity", parseInt(e.target.value));
+    });
+
+    // Layer buttons
+    sb.querySelectorAll("#layer-btns .sb-btn").forEach(btn => {
+      btn.addEventListener("click", () => layerAction(btn.dataset.action));
+    });
+
+    // Action buttons
+    sb.querySelectorAll("#action-btns .sb-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        switch (btn.dataset.action) {
+          case "duplicate": duplicateSelected(); break;
+          case "delete": deleteSelected(); break;
+          case "copy-link": copyLink(); break;
+        }
+      });
+    });
+
+    // Font size
+    sb.querySelector("#font-size").addEventListener("change", e => setProp("fontSize", parseInt(e.target.value)));
   }
 
   // ── Floating action bar ─────────────────────────────────────────────────
@@ -310,25 +483,70 @@
       #title-input { border:1px solid #ddd; border-radius:6px; padding:4px 8px; font-size:.875rem; width:160px; outline:none; }
       #title-input:focus { border-color:#1e1e2e; }
       #toolbar { display:flex; gap:4px; background:#f4f4f5; border-radius:8px; padding:4px; }
-      .tool-btn { background:none; border:none; border-radius:6px; padding:5px 10px; font-size:1rem; cursor:pointer; color:#555; transition:background .15s; }
+      .tool-btn { position:relative; background:none; border:none; border-radius:6px; padding:5px 10px; font-size:1rem; cursor:pointer; color:#555; transition:background .15s; }
       .tool-btn:hover { background:#e4e4e7; }
       .tool-btn.active { background:#1e1e2e; color:#fff; }
+      .tool-num { position:absolute; bottom:1px; right:2px; font-size:9px; line-height:1; opacity:0.45; pointer-events:none; }
       #topbar button { background:#f4f4f5; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:.85rem; }
       #topbar button:hover { background:#e4e4e7; }
       #btn-save { background:#1e1e2e; color:#fff; font-weight:600; }
       #btn-save:hover { background:#333; }
       #save-status { font-size:.75rem; color:#888; }
-      #props { display:flex; align-items:center; gap:12px; padding:5px 14px; background:#fafafa; border-bottom:1px solid #ececec; flex-shrink:0; }
-      #props label { display:flex; align-items:center; gap:5px; font-size:.78rem; color:#555; }
-      #props input[type=color] { width:28px; height:22px; padding:0; border:1px solid #ccc; border-radius:4px; cursor:pointer; }
-      #props select { font-size:.78rem; border:1px solid #ccc; border-radius:4px; padding:2px 4px; }
+
+      /* Main area: sidebar + canvas */
+      #main-area { display:flex; flex:1; overflow:hidden; }
+
+      /* Sidebar */
+      #sidebar { width:202px; background:#fff; border-right:1px solid #e0e0e0; overflow-y:auto; flex-shrink:0; padding:4px 0; }
+      .sb-section { padding:6px 12px; border-bottom:1px solid #f0f0f0; }
+      .sb-section:last-child { border-bottom:none; }
+      .sb-label { font-size:0.68rem; color:#999; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:4px; font-weight:500; }
+      .sb-row { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+
+      /* Color swatches */
+      .swatch { width:22px; height:22px; border-radius:4px; border:2px solid transparent; cursor:pointer; padding:0; box-sizing:border-box; flex-shrink:0; }
+      .swatch:hover { border-color:#aaa; }
+      .swatch.active { border-color:#1e1e2e; box-shadow:0 0 0 1px #1e1e2e; }
+      .swatch-none { background:#fff; border:2px solid #ddd; position:relative; overflow:hidden; }
+      .swatch-none::after { content:''; position:absolute; top:0; left:0; right:0; bottom:0; background:linear-gradient(to top right, transparent calc(50% - 0.8px), #e03131 calc(50% - 0.8px), #e03131 calc(50% + 0.8px), transparent calc(50% + 0.8px)); }
+      .swatch-none.active { border-color:#1e1e2e; }
+      #sidebar input[type=color] { width:22px; height:22px; padding:0; border:1px solid #ddd; border-radius:4px; cursor:pointer; flex-shrink:0; }
+
+      /* Property buttons */
+      .sb-btn { display:flex; align-items:center; justify-content:center; width:32px; height:28px; border:1px solid transparent; border-radius:4px; background:none; cursor:pointer; color:#555; padding:0; transition:background .12s; }
+      .sb-btn:hover { background:#f0f0f0; }
+      .sb-btn.active { background:#e4e4e7; border-color:#ccc; color:#1e1e2e; }
+
+      /* Opacity slider */
+      #sidebar input[type=range] { flex:1; height:4px; accent-color:#1e1e2e; cursor:pointer; }
+      #opacity-val { font-size:0.72rem; color:#555; min-width:24px; text-align:right; }
+
+      /* Font size select */
+      #sidebar select { font-size:0.8rem; border:1px solid #ddd; border-radius:4px; padding:3px 6px; width:100%; cursor:pointer; }
+
+      /* Canvas wrap */
       #canvas-wrap { flex:1; position:relative; overflow:hidden; background:#f4f4f5; }
       #canvas { display:block; cursor:crosshair; }
-      .fill-none-wrap { gap:3px !important; }
+
       /* Floating action bar */
       #godraw-fab { position:absolute; bottom:12px; right:12px; display:flex; gap:6px; z-index:20; }
       #godraw-fab button { width:36px; height:36px; border:none; border-radius:8px; background:rgba(255,255,255,0.92); color:#333; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 4px rgba(0,0,0,0.15); transition:background .15s, box-shadow .15s; }
       #godraw-fab button:hover { background:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.2); }
+
+      /* Responsive: collapse sidebar */
+      @media (max-width:580px) {
+        #sidebar { width:48px; padding:2px 0; }
+        .sb-label { display:none; }
+        .sb-section { padding:4px; }
+        .sb-row { justify-content:center; }
+        .swatch { width:18px; height:18px; }
+        #sidebar input[type=color] { width:18px; height:18px; }
+        .sb-btn { width:28px; height:24px; }
+        #sidebar select { width:40px; font-size:0.7rem; }
+        #opacity-slider { width:36px; }
+        #opacity-val { display:none; }
+        #sidebar .sb-action[data-action="copy-link"] { display:none; }
+      }
     `;
     document.head.appendChild(s);
   }
@@ -354,6 +572,56 @@
       cx: e.clientX - rect.left,
       cy: e.clientY - rect.top,
     };
+  }
+
+  // ── Roughness helpers ─────────────────────────────────────────────────────
+  function hashCode(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) {
+      h = ((h << 5) - h) + str.charCodeAt(i);
+      h |= 0;
+    }
+    return Math.abs(h) || 1;
+  }
+
+  function seededRandom(seed) {
+    let s = seed | 0;
+    return function () {
+      s = (s + 0x6D2B79F5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function roughLine(ctx, x1, y1, x2, y2, rough, rng) {
+    const len = Math.hypot(x2 - x1, y2 - y1);
+    if (len < 0.1) return;
+    const amp = rough * Math.min(len * 0.08, 6);
+    const dx = x2 - x1, dy = y2 - y1;
+    const nx = -dy / len, ny = dx / len;
+    const cpx = (x1 + x2) / 2 + nx * (rng() - 0.5) * amp * 2;
+    const cpy = (y1 + y2) / 2 + ny * (rng() - 0.5) * amp * 2;
+    ctx.moveTo(x1 + (rng() - 0.5) * amp * 0.5, y1 + (rng() - 0.5) * amp * 0.5);
+    ctx.quadraticCurveTo(cpx, cpy, x2 + (rng() - 0.5) * amp * 0.5, y2 + (rng() - 0.5) * amp * 0.5);
+  }
+
+  function roughEllipse(ctx, cx, cy, rx, ry, rough, rng) {
+    const steps = 24;
+    const maxR = Math.max(rx, ry);
+    const amp = rough * Math.min(maxR * 0.05, 4);
+    const sx = cx + (rx + (rng() - 0.5) * amp * 2);
+    const sy = cy + (rng() - 0.5) * amp;
+    ctx.moveTo(sx, sy);
+    for (let i = 1; i <= steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      const x = cx + Math.cos(a) * (rx + (rng() - 0.5) * amp * 2);
+      const y = cy + Math.sin(a) * (ry + (rng() - 0.5) * amp * 2);
+      const pa = ((i - 0.5) / steps) * Math.PI * 2;
+      const cpx = cx + Math.cos(pa) * (rx + (rng() - 0.5) * amp * 3);
+      const cpy = cy + Math.sin(pa) * (ry + (rng() - 0.5) * amp * 3);
+      ctx.quadraticCurveTo(cpx, cpy, x, y);
+    }
   }
 
   // ── Rendering ─────────────────────────────────────────────────────────────
@@ -387,11 +655,11 @@
 
     // Draw all elements
     for (const el of scene.elements) {
-      drawElement(ctx, el, false);
+      drawElement(ctx, el);
     }
 
     // Current element (being drawn)
-    if (currentEl) drawElement(ctx, currentEl, false);
+    if (currentEl) drawElement(ctx, currentEl);
 
     // Selection handles
     if (IS_EDIT) {
@@ -401,6 +669,9 @@
     }
 
     ctx.restore();
+
+    // Sync sidebar with current state
+    if (IS_EDIT) updateSidebar();
   }
 
   function applyStyle(ctx, el) {
@@ -409,11 +680,20 @@
     ctx.lineWidth = el.strokeWidth || 2;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
+    ctx.globalAlpha = (el.opacity ?? 100) / 100;
+
+    // Stroke style (dash pattern)
+    const sw = el.strokeWidth || 2;
+    switch (el.strokeStyle || "solid") {
+      case "dashed": ctx.setLineDash([sw * 4, sw * 3]); break;
+      case "dotted": ctx.setLineDash([sw * 0.5, sw * 2.5]); break;
+      default: ctx.setLineDash([]); break;
+    }
   }
 
-  function drawElement(ctx, el, sel) {
-    applyStyle(ctx, el);
+  function drawElement(ctx, el) {
     ctx.save();
+    applyStyle(ctx, el);
     switch (el.type) {
       case "rect":     drawRect(ctx, el); break;
       case "ellipse":  drawEllipse(ctx, el); break;
@@ -427,44 +707,112 @@
 
   function drawRect(ctx, el) {
     const { x, y, w, h } = el;
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, h, 4);
+    const r = el.roughness ?? 0;
+    const rn = el.roundness || "sharp";
+    const radius = rn === "round" ? Math.min(Math.abs(w), Math.abs(h)) * 0.15 : 0;
+
+    // Fill (always clean path)
     if (el.fillColor && el.fillColor !== "transparent") {
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, radius);
       ctx.fillStyle = el.fillColor;
       ctx.fill();
     }
-    ctx.stroke();
+
+    if (r === 0) {
+      // Clean stroke
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, radius);
+      ctx.stroke();
+    } else {
+      // Rough stroke — normalize corners
+      const x0 = Math.min(x, x + w), y0 = Math.min(y, y + h);
+      const x1 = Math.max(x, x + w), y1 = Math.max(y, y + h);
+      const seed = hashCode(el.id);
+      for (let pass = 0; pass < 2; pass++) {
+        const rng = seededRandom(seed + pass * 1000);
+        ctx.beginPath();
+        roughLine(ctx, x0, y0, x1, y0, r, rng);
+        roughLine(ctx, x1, y0, x1, y1, r, rng);
+        roughLine(ctx, x1, y1, x0, y1, r, rng);
+        roughLine(ctx, x0, y1, x0, y0, r, rng);
+        ctx.stroke();
+      }
+    }
   }
 
   function drawEllipse(ctx, el) {
     const cx = el.x + el.w / 2, cy = el.y + el.h / 2;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, Math.abs(el.w / 2), Math.abs(el.h / 2), 0, 0, Math.PI * 2);
+    const rx = Math.abs(el.w / 2), ry = Math.abs(el.h / 2);
+    const r = el.roughness ?? 0;
+
+    // Fill (always clean path)
     if (el.fillColor && el.fillColor !== "transparent") {
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
       ctx.fillStyle = el.fillColor;
       ctx.fill();
     }
-    ctx.stroke();
+
+    if (r === 0) {
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      const seed = hashCode(el.id);
+      for (let pass = 0; pass < 2; pass++) {
+        const rng = seededRandom(seed + pass * 1000);
+        ctx.beginPath();
+        roughEllipse(ctx, cx, cy, rx, ry, r, rng);
+        ctx.stroke();
+      }
+    }
   }
 
   function drawLine(ctx, el) {
-    ctx.beginPath();
-    ctx.moveTo(el.x, el.y);
-    ctx.lineTo(el.x2, el.y2);
-    ctx.stroke();
+    const r = el.roughness ?? 0;
+    if (r === 0) {
+      ctx.beginPath();
+      ctx.moveTo(el.x, el.y);
+      ctx.lineTo(el.x2, el.y2);
+      ctx.stroke();
+    } else {
+      const seed = hashCode(el.id);
+      for (let pass = 0; pass < 2; pass++) {
+        const rng = seededRandom(seed + pass * 1000);
+        ctx.beginPath();
+        roughLine(ctx, el.x, el.y, el.x2, el.y2, r, rng);
+        ctx.stroke();
+      }
+    }
   }
 
   function drawArrow(ctx, el) {
     const dx = el.x2 - el.x, dy = el.y2 - el.y;
     const len = Math.hypot(dx, dy);
     if (len < 1) return;
+    const r = el.roughness ?? 0;
+
+    // Line body
+    if (r === 0) {
+      ctx.beginPath();
+      ctx.moveTo(el.x, el.y);
+      ctx.lineTo(el.x2, el.y2);
+      ctx.stroke();
+    } else {
+      const seed = hashCode(el.id);
+      for (let pass = 0; pass < 2; pass++) {
+        const rng = seededRandom(seed + pass * 1000);
+        ctx.beginPath();
+        roughLine(ctx, el.x, el.y, el.x2, el.y2, r, rng);
+        ctx.stroke();
+      }
+    }
+
+    // Arrowhead (always clean)
     const ux = dx / len, uy = dy / len;
     const hw = 10, hl = 18;
-    ctx.beginPath();
-    ctx.moveTo(el.x, el.y);
-    ctx.lineTo(el.x2, el.y2);
-    ctx.stroke();
-    // Arrowhead
+    ctx.setLineDash([]); // arrowhead always solid
     ctx.beginPath();
     ctx.moveTo(el.x2, el.y2);
     ctx.lineTo(el.x2 - hl * ux + hw * uy, el.y2 - hl * uy - hw * ux);
@@ -500,6 +848,7 @@
     ctx.strokeStyle = "#3b82f6";
     ctx.lineWidth = 1.5 / vp.scale;
     ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
+    ctx.globalAlpha = 1;
     ctx.strokeRect(bb.x - pad, bb.y - pad, bb.w + pad * 2, bb.h + pad * 2);
     ctx.setLineDash([]);
     ctx.restore();
@@ -514,6 +863,7 @@
       ctx.beginPath();
       ctx.arc(cx, cy, 4 / vp.scale, 0, Math.PI * 2);
       ctx.fillStyle = "#3b82f6";
+      ctx.globalAlpha = 1;
       ctx.fill();
       ctx.strokeStyle = "#fff";
       ctx.lineWidth = 1.5 / vp.scale;
@@ -697,11 +1047,12 @@
       spaceDown = true;
       canvas.style.cursor = "grab";
     }
-    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT")) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key === "z") { e.preventDefault(); undo(); }
     if (mod && (e.key === "y" || (e.shiftKey && e.key === "z"))) { e.preventDefault(); redo(); }
     if (mod && e.key === "s") { e.preventDefault(); saveDrawing(); }
+    if (mod && (e.key === "d" || e.key === "D")) { e.preventDefault(); duplicateSelected(); }
     if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
     if (e.key === "v" || e.key === "V" || e.key === "1") setTool("select");
     if (e.key === "r" || e.key === "R" || e.key === "2") setTool("rect");
@@ -732,6 +1083,11 @@
       selectedIds = new Set([hit.id]);
       commitTextInput();
       startTextInputOnElement(hit);
+    } else if (!hit) {
+      // Double-click on empty canvas creates text
+      setTool("text");
+      commitTextInput();
+      startTextInput(wx, wy);
     }
   }
 
@@ -811,6 +1167,142 @@
     render();
   }
 
+  // ── Property sync ─────────────────────────────────────────────────────────
+  function setProp(name, value) {
+    // Always update the global default
+    switch (name) {
+      case "strokeColor": strokeColor = value; break;
+      case "fillColor": fillColor = value; break;
+      case "strokeWidth": strokeWidth = value; break;
+      case "strokeStyle": strokeStyle = value; break;
+      case "roughness": roughness = value; break;
+      case "roundness": roundness = value; break;
+      case "opacity": opacity = value; break;
+      case "fontSize": fontSize = value; break;
+    }
+    // Apply to selected elements
+    if (selectedIds.size) {
+      snapshot();
+      for (const el of scene.elements) {
+        if (!selectedIds.has(el.id)) continue;
+        el[name] = value;
+      }
+    }
+    render();
+  }
+
+  function updateSidebar() {
+    const sb = document.getElementById("sidebar");
+    if (!sb) return;
+
+    // Get values from selected element (single) or globals
+    let sel = null;
+    if (selectedIds.size === 1) {
+      sel = scene.elements.find(e => selectedIds.has(e.id));
+    }
+
+    const sc = sel ? (sel.strokeColor || "#1e1e2e") : strokeColor;
+    const fc = sel ? (sel.fillColor || "transparent") : fillColor;
+    const sw = sel ? (sel.strokeWidth || 2) : strokeWidth;
+    const ss = sel ? (sel.strokeStyle || "solid") : strokeStyle;
+    const rg = sel ? (sel.roughness ?? 0) : roughness;
+    const rn = sel ? (sel.roundness || "sharp") : roundness;
+    const op = sel ? (sel.opacity ?? 100) : opacity;
+    const fs = sel ? (sel.fontSize || 16) : fontSize;
+
+    // Stroke swatches
+    sb.querySelectorAll("#stroke-swatches .swatch").forEach(b => {
+      b.classList.toggle("active", b.dataset.color === sc);
+    });
+    const scp = sb.querySelector("#stroke-color-picker");
+    if (sc !== "transparent") scp.value = sc;
+
+    // Fill swatches
+    sb.querySelectorAll("#fill-swatches .swatch").forEach(b => {
+      b.classList.toggle("active", b.dataset.color === fc);
+    });
+    const fcp = sb.querySelector("#fill-color-picker");
+    if (fc && fc !== "transparent") fcp.value = fc;
+
+    // Stroke width
+    sb.querySelectorAll("#sw-btns .sb-btn").forEach(b => {
+      b.classList.toggle("active", parseInt(b.dataset.val) === sw);
+    });
+
+    // Stroke style
+    sb.querySelectorAll("#ss-btns .sb-btn").forEach(b => {
+      b.classList.toggle("active", b.dataset.val === ss);
+    });
+
+    // Roughness
+    sb.querySelectorAll("#rg-btns .sb-btn").forEach(b => {
+      b.classList.toggle("active", parseInt(b.dataset.val) === rg);
+    });
+
+    // Roundness
+    sb.querySelectorAll("#rn-btns .sb-btn").forEach(b => {
+      b.classList.toggle("active", b.dataset.val === rn);
+    });
+
+    // Opacity
+    sb.querySelector("#opacity-slider").value = op;
+    sb.querySelector("#opacity-val").textContent = op;
+
+    // Font size section — visible only for text tool or text element
+    const fontSec = document.getElementById("font-section");
+    const showFont = activeTool === "text" || (sel && sel.type === "text");
+    fontSec.style.display = showFont ? "" : "none";
+    if (showFont) {
+      sb.querySelector("#font-size").value = String(fs);
+    }
+  }
+
+  // ── Layer operations ──────────────────────────────────────────────────────
+  function layerAction(action) {
+    if (selectedIds.size !== 1) return;
+    const id = [...selectedIds][0];
+    const idx = scene.elements.findIndex(e => e.id === id);
+    if (idx === -1) return;
+    snapshot();
+    const [moved] = scene.elements.splice(idx, 1);
+    switch (action) {
+      case "to-back": scene.elements.unshift(moved); break;
+      case "backward": scene.elements.splice(Math.max(0, idx - 1), 0, moved); break;
+      case "forward": scene.elements.splice(Math.min(scene.elements.length, idx + 1), 0, moved); break;
+      case "to-front": scene.elements.push(moved); break;
+    }
+    render();
+  }
+
+  // ── Duplicate ─────────────────────────────────────────────────────────────
+  function duplicateSelected() {
+    if (!selectedIds.size) return;
+    snapshot();
+    const newIds = new Set();
+    for (const el of [...scene.elements]) {
+      if (!selectedIds.has(el.id)) continue;
+      const clone = JSON.parse(JSON.stringify(el));
+      clone.id = uid();
+      if (clone.x !== undefined) { clone.x += 10; clone.y += 10; }
+      if (clone.x2 !== undefined) { clone.x2 += 10; clone.y2 += 10; }
+      if (clone.pts) { clone.pts = clone.pts.map(p => ({ x: p.x + 10, y: p.y + 10 })); }
+      scene.elements.push(clone);
+      newIds.add(clone.id);
+    }
+    selectedIds = newIds;
+    render();
+  }
+
+  // ── Copy link ─────────────────────────────────────────────────────────────
+  function copyLink() {
+    const url = window.location.origin + `${CFG.basePath}/${CFG.id}`;
+    navigator.clipboard.writeText(url).then(() => {
+      const status = document.getElementById("save-status");
+      if (status) { status.textContent = "Link copied!"; setTimeout(() => status.textContent = "", 2000); }
+    }).catch(() => {});
+  }
+
+  // ── Element creation ──────────────────────────────────────────────────────
   function makeElement(wx, wy) {
     const base = {
       id: uid(),
@@ -818,6 +1310,10 @@
       strokeColor,
       fillColor,
       strokeWidth,
+      strokeStyle,
+      roughness,
+      roundness,
+      opacity,
     };
     switch (activeTool) {
       case "rect":
@@ -943,6 +1439,7 @@
       w: maxW, h: lines.length * fs * 1.3,
       text, fontSize: fs,
       strokeColor,
+      opacity,
     });
     render();
   }
