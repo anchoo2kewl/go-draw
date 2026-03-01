@@ -528,7 +528,7 @@
       #toolbar { display:flex; gap:4px; background:#f4f4f5; border-radius:8px; padding:4px; }
       .tool-btn { position:relative; background:none; border:none; border-radius:6px; padding:5px 10px; font-size:1rem; cursor:pointer; color:#555; transition:background .15s; }
       .tool-btn:hover { background:#e4e4e7; }
-      .tool-btn.active { background:#1e1e2e; color:#fff; }
+      .tool-btn.active { background:#6366f1; color:#fff; box-shadow:0 1px 4px rgba(99,102,241,0.4); }
       .tool-num { position:absolute; bottom:0; right:1px; font-size:8px; line-height:1; opacity:0.55; pointer-events:none; font-family:monospace; }
       #topbar button { background:#f4f4f5; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:.85rem; }
       #topbar button:hover { background:#e4e4e7; }
