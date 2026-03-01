@@ -44,10 +44,16 @@
   let redoStack = [];
   const UNDO_LIMIT = 60;
 
+  let autoSaveTimer = null;
   function snapshot() {
     undoStack.push(JSON.stringify(scene.elements));
     if (undoStack.length > UNDO_LIMIT) undoStack.shift();
     redoStack = [];
+    // Auto-save after 2s of inactivity
+    if (IS_EDIT) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = setTimeout(saveDrawing, 2000);
+    }
   }
 
   function undo() {
@@ -76,13 +82,13 @@
 
   // Build toolbar HTML (only in edit mode)
   const TOOLS = [
-    { id: "select",    icon: "\u2B21", title: "Select (V)" },
-    { id: "rect",      icon: "\u25AD", title: "Rectangle (R)" },
-    { id: "ellipse",   icon: "\u25EF", title: "Ellipse (E)" },
-    { id: "line",      icon: "\u2571", title: "Line (L)" },
-    { id: "arrow",     icon: "\u2192", title: "Arrow (A)" },
-    { id: "pencil",    icon: "\u270F", title: "Pencil (P)" },
-    { id: "text",      icon: "T", title: "Text (T)" },
+    { id: "select",    icon: "\u2B21", title: "Select (V / 1)" },
+    { id: "rect",      icon: "\u25AD", title: "Rectangle (R / 2)" },
+    { id: "ellipse",   icon: "\u25EF", title: "Ellipse (E / 3)" },
+    { id: "line",      icon: "\u2571", title: "Line (L / 4)" },
+    { id: "arrow",     icon: "\u2192", title: "Arrow (A / 5)" },
+    { id: "pencil",    icon: "\u270F", title: "Pencil (P / 6)" },
+    { id: "text",      icon: "T", title: "Text (T / 7)" },
   ];
 
   let toolbar, canvas, ctx;
@@ -279,6 +285,8 @@
     for (const [k, v] of Object.entries(attrs || {})) {
       if (k === "dataset") {
         for (const [dk, dv] of Object.entries(v)) e.dataset[dk] = dv;
+      } else if (k === "class") {
+        e.className = v;
       } else {
         e[k] = v;
       }
@@ -695,13 +703,13 @@
     if (mod && (e.key === "y" || (e.shiftKey && e.key === "z"))) { e.preventDefault(); redo(); }
     if (mod && e.key === "s") { e.preventDefault(); saveDrawing(); }
     if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
-    if (e.key === "v" || e.key === "V") setTool("select");
-    if (e.key === "r" || e.key === "R") setTool("rect");
-    if (e.key === "e" || e.key === "E") setTool("ellipse");
-    if (e.key === "l" || e.key === "L") setTool("line");
-    if (e.key === "a" || e.key === "A") setTool("arrow");
-    if (e.key === "p" || e.key === "P") setTool("pencil");
-    if (e.key === "t" || e.key === "T") setTool("text");
+    if (e.key === "v" || e.key === "V" || e.key === "1") setTool("select");
+    if (e.key === "r" || e.key === "R" || e.key === "2") setTool("rect");
+    if (e.key === "e" || e.key === "E" || e.key === "3") setTool("ellipse");
+    if (e.key === "l" || e.key === "L" || e.key === "4") setTool("line");
+    if (e.key === "a" || e.key === "A" || e.key === "5") setTool("arrow");
+    if (e.key === "p" || e.key === "P" || e.key === "6") setTool("pencil");
+    if (e.key === "t" || e.key === "T" || e.key === "7") setTool("text");
     if (e.key === "Escape") { commitTextInput(); selectedIds.clear(); render(); }
     if (e.key === "F11") { e.preventDefault(); toggleFullscreen(); }
   }
@@ -972,19 +980,6 @@
     } catch (err) {
       console.error("go-draw: failed to load drawing", err);
     }
-  }
-
-  // ── Auto-save ─────────────────────────────────────────────────────────────
-  if (IS_EDIT) {
-    let autoSaveTimer = null;
-    const origSnapshot = snapshot;
-    window.__godrawSnapshot = () => {
-      origSnapshot();
-      clearTimeout(autoSaveTimer);
-      autoSaveTimer = setTimeout(saveDrawing, 2000);
-    };
-    // Replace snapshot with auto-save version
-    Object.defineProperty(window, "__snap", { get: () => origSnapshot });
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────
