@@ -103,7 +103,8 @@
 
   // Build toolbar HTML (only in edit mode)
   const TOOLS = [
-    { id: "select",    icon: "\u2B21", title: "Select (V / 1)", num: "1" },
+    { id: "hand",      icon: '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M7.5 1.75a.75.75 0 011.5 0V6h.25V2.25a.75.75 0 011.5 0V6h.25V3.25a.75.75 0 011.5 0V9.5l.6-.4a.75.75 0 01.9 1.2l-1.5 1.2c-.7.6-1.6 1-2.7 1h-1c-2.2 0-4-1.8-4-4V6.25a.75.75 0 011.5 0V6L6 2.75a.75.75 0 011.5 0V6z"/></svg>', title: "Hand (H)", num: "" },
+    { id: "select",    icon: '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2.5 1L12 8l-4.5 1L5.5 14z"/></svg>', title: "Select (V / 1)", num: "1" },
     { id: "rect",      icon: "\u25AD", title: "Rectangle (R / 2)", num: "2" },
     { id: "ellipse",   icon: "\u25EF", title: "Ellipse (E / 3)", num: "3" },
     { id: "line",      icon: "\u2571", title: "Line (L / 4)", num: "4" },
@@ -111,7 +112,7 @@
     { id: "pencil",    icon: "\u270F", title: "Pencil (P / 6)", num: "6" },
     { id: "text",      icon: "T", title: "Text (T / 7)", num: "7" },
     { id: "eraser",    icon: "\u232B", title: "Eraser (X / 8)", num: "8" },
-    { id: "image",     icon: "\uD83D\uDDBC", title: "Image (I / 9)", num: "9" },
+    { id: "image",     icon: '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3a1 1 0 011-1h12a1 1 0 011 1v10a1 1 0 01-1 1H2a1 1 0 01-1-1V3zm1 7.5V13h12v-1.5l-3-3-2 2-4-4-3 3zM11 6a1 1 0 100-2 1 1 0 000 2z"/></svg>', title: "Image (I / 9)", num: "9" },
   ];
 
   let toolbar, canvas, ctx;
@@ -1057,6 +1058,11 @@
       return;
     }
 
+    if (activeTool === "hand") {
+      startPan(e);
+      return;
+    }
+
     if (activeTool === "select") {
       // Hit test in reverse (topmost first)
       const hit = [...scene.elements].reverse().find(el => hitTest(el, wx, wy));
@@ -1186,7 +1192,14 @@
   }
 
   function onMouseUp(e) {
-    if (panning) { panning = false; canvas.style.cursor = activeTool === "eraser" ? "none" : (IS_EDIT ? "crosshair" : "grab"); return; }
+    if (panning) {
+      panning = false;
+      if (activeTool === "hand") canvas.style.cursor = "grab";
+      else if (activeTool === "eraser") canvas.style.cursor = "none";
+      else if (activeTool === "select") canvas.style.cursor = "default";
+      else canvas.style.cursor = IS_EDIT ? "crosshair" : "grab";
+      return;
+    }
     if (eraserActive) { eraserActive = false; erasedIds = new Set(); return; }
     if (isDragging) { isDragging = false; snapshot(); return; }
     if (!drawing) return;
@@ -1217,6 +1230,7 @@
     if (mod && e.key === "s") { e.preventDefault(); saveDrawing(); }
     if (mod && (e.key === "d" || e.key === "D")) { e.preventDefault(); duplicateSelected(); }
     if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
+    if (e.key === "h" || e.key === "H") setTool("hand");
     if (e.key === "v" || e.key === "V" || e.key === "1") setTool("select");
     if (e.key === "r" || e.key === "R" || e.key === "2") setTool("rect");
     if (e.key === "e" || e.key === "E" || e.key === "3") setTool("ellipse");
@@ -1232,7 +1246,13 @@
   }
 
   window.addEventListener("keyup", e => {
-    if (e.code === "Space") { spaceDown = false; canvas.style.cursor = IS_EDIT ? "crosshair" : "grab"; }
+    if (e.code === "Space") {
+      spaceDown = false;
+      if (activeTool === "hand") canvas.style.cursor = "grab";
+      else if (activeTool === "eraser") canvas.style.cursor = "none";
+      else if (activeTool === "select") canvas.style.cursor = "default";
+      else canvas.style.cursor = IS_EDIT ? "crosshair" : "grab";
+    }
   });
 
   function onViewKeyDown(e) {
@@ -1334,6 +1354,8 @@
       eraserCursorPos = null;
     } else if (t === "select") {
       canvas.style.cursor = "default";
+    } else if (t === "hand") {
+      canvas.style.cursor = "grab";
     } else {
       canvas.style.cursor = "crosshair";
     }
