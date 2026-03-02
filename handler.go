@@ -236,14 +236,35 @@ func (d *Draw) handleNew(w http.ResponseWriter, r *http.Request) {
 
 // ── API New (JSON) ───────────────────────────────────────────────────────────
 
+type apiNewRequest struct {
+	Title string          `json:"title"`
+	Scene json.RawMessage `json:"scene"`
+}
+
 func (d *Draw) handleAPINew(w http.ResponseWriter, r *http.Request) {
 	id := newID()
+	title := "Untitled"
+	scene := json.RawMessage(`{"version":1,"elements":[]}`)
+
+	// Accept optional title and scene from request body.
+	if r.Body != nil && r.ContentLength != 0 {
+		var req apiNewRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			if req.Title != "" {
+				title = req.Title
+			}
+			if len(req.Scene) > 0 {
+				scene = req.Scene
+			}
+		}
+	}
+
 	drawing := &store.Drawing{
 		ID:        id,
-		Title:     "Untitled",
+		Title:     title,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
-		Scene:     json.RawMessage(`{"version":1,"elements":[]}`),
+		Scene:     scene,
 	}
 	if err := d.store.Save(drawing); err != nil {
 		http.Error(w, "could not create drawing: "+err.Error(), http.StatusInternalServerError)
