@@ -41,6 +41,9 @@
   let selectedIds = new Set();
   let dragOffset = { x: 0, y: 0 };
   let isDragging = false;
+  let isRotating = false;
+  let rotateStartAngle = 0;
+  let rotateOriginalAngle = 0;
   let textInput = null;
 
   // ── Eraser state ─────────────────────────────────────────────────────────
@@ -345,6 +348,13 @@
           </select>
         </div>
       </div>
+      <div class="sb-section" id="angle-section" style="display:none">
+        <div class="sb-label">Angle</div>
+        <div class="sb-row">
+          <input type="range" id="angle-slider" min="-180" max="180" value="0" step="1">
+          <span id="angle-val" style="font-size:0.72rem;color:#555;min-width:30px;text-align:right">0\u00B0</span>
+        </div>
+      </div>
     `;
     return sb;
   }
@@ -409,6 +419,20 @@
 
     // Font size
     sb.querySelector("#font-size").addEventListener("change", e => setProp("fontSize", parseInt(e.target.value)));
+
+    // Angle slider
+    sb.querySelector("#angle-slider").addEventListener("input", e => {
+      const deg = parseInt(e.target.value);
+      sb.querySelector("#angle-val").textContent = deg + "\u00B0";
+      if (selectedIds.size === 1) {
+        const sel = scene.elements.find(el => selectedIds.has(el.id));
+        if (sel) {
+          snapshot();
+          sel.angle = deg * Math.PI / 180;
+          render();
+        }
+      }
+    });
   }
 
   // ── Floating action bar ─────────────────────────────────────────────────
@@ -766,6 +790,14 @@
   function drawElement(ctx, el) {
     ctx.save();
     applyStyle(ctx, el);
+    // Apply rotation around element center
+    const angle = el.angle || 0;
+    if (angle) {
+      const c = getCenter(el);
+      ctx.translate(c.x, c.y);
+      ctx.rotate(angle);
+      ctx.translate(-c.x, -c.y);
+    }
     switch (el.type) {
       case "rect":     drawRect(ctx, el); break;
       case "ellipse":  drawEllipse(ctx, el); break;
@@ -957,17 +989,31 @@
     }
   }
 
+  const ROTATE_HANDLE_DIST = 25; // pixels from top of selection box
+
   function drawSelection(ctx, el) {
     const bb = getBBox(el);
     const pad = 6;
+    const angle = el.angle || 0;
+    const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+
     ctx.save();
+    ctx.globalAlpha = 1;
+
+    // Rotate selection around element center
+    if (angle) {
+      ctx.translate(cx, cy);
+      ctx.rotate(angle);
+      ctx.translate(-cx, -cy);
+    }
+
+    // Dashed selection rect
     ctx.strokeStyle = "#3b82f6";
     ctx.lineWidth = 1.5 / vp.scale;
     ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
-    ctx.globalAlpha = 1;
     ctx.strokeRect(bb.x - pad, bb.y - pad, bb.w + pad * 2, bb.h + pad * 2);
     ctx.setLineDash([]);
-    ctx.restore();
+
     // Corner handles
     const corners = [
       [bb.x - pad, bb.y - pad],
@@ -975,16 +1021,60 @@
       [bb.x - pad, bb.y + bb.h + pad],
       [bb.x + bb.w + pad, bb.y + bb.h + pad],
     ];
-    corners.forEach(([cx, cy]) => {
+    corners.forEach(([hx, hy]) => {
       ctx.beginPath();
-      ctx.arc(cx, cy, 4 / vp.scale, 0, Math.PI * 2);
+      ctx.arc(hx, hy, 4 / vp.scale, 0, Math.PI * 2);
       ctx.fillStyle = "#3b82f6";
-      ctx.globalAlpha = 1;
       ctx.fill();
       ctx.strokeStyle = "#fff";
       ctx.lineWidth = 1.5 / vp.scale;
       ctx.stroke();
     });
+
+    // Rotation handle — stem line from top-center to handle
+    const handleDist = ROTATE_HANDLE_DIST / vp.scale;
+    const stemX = bb.x + bb.w / 2;
+    const stemTopY = bb.y - pad;
+    const handleY = stemTopY - handleDist;
+
+    ctx.beginPath();
+    ctx.moveTo(stemX, stemTopY);
+    ctx.lineTo(stemX, handleY);
+    ctx.strokeStyle = "#3b82f6";
+    ctx.lineWidth = 1 / vp.scale;
+    ctx.stroke();
+
+    // Rotation handle circle
+    ctx.beginPath();
+    ctx.arc(stemX, handleY, 5 / vp.scale, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff";
+    ctx.fill();
+    ctx.strokeStyle = "#3b82f6";
+    ctx.lineWidth = 1.5 / vp.scale;
+    ctx.stroke();
+
+    // Rotation icon (↻) inside handle
+    ctx.fillStyle = "#3b82f6";
+    ctx.font = `${9 / vp.scale}px sans-serif`;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    ctx.fillText("\u21BB", stemX, handleY);
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
+
+    ctx.restore();
+  }
+
+  function getRotationHandlePos(el) {
+    const bb = getBBox(el);
+    const pad = 6;
+    const angle = el.angle || 0;
+    const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+    const handleDist = ROTATE_HANDLE_DIST / vp.scale;
+    const localX = bb.x + bb.w / 2;
+    const localY = bb.y - pad - handleDist;
+    if (!angle) return { x: localX, y: localY };
+    return rotatePoint(localX, localY, cx, cy, angle);
   }
 
   function getBBox(el) {
@@ -1010,8 +1100,27 @@
     }
   }
 
+  function getCenter(el) {
+    const bb = getBBox(el);
+    return { x: bb.x + bb.w / 2, y: bb.y + bb.h / 2 };
+  }
+
+  function rotatePoint(px, py, cx, cy, angle) {
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const dx = px - cx, dy = py - cy;
+    return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+  }
+
   // ── Hit testing ───────────────────────────────────────────────────────────
   function hitTest(el, wx, wy) {
+    // Un-rotate the test point into element's local coordinate space
+    const angle = el.angle || 0;
+    if (angle) {
+      const c = getCenter(el);
+      const p = rotatePoint(wx, wy, c.x, c.y, -angle);
+      wx = p.x;
+      wy = p.y;
+    }
     const pad = 8;
     switch (el.type) {
       case "rect":
@@ -1085,6 +1194,23 @@
     }
 
     if (activeTool === "select") {
+      // Check rotation handle first (only when exactly one element selected)
+      if (selectedIds.size === 1) {
+        const sel = scene.elements.find(e => selectedIds.has(e.id));
+        if (sel) {
+          const rh = getRotationHandlePos(sel);
+          if (Math.hypot(wx - rh.x, wy - rh.y) < 8 / vp.scale) {
+            isRotating = true;
+            const c = getCenter(sel);
+            rotateStartAngle = Math.atan2(wy - c.y, wx - c.x);
+            rotateOriginalAngle = sel.angle || 0;
+            snapshot();
+            canvas.style.cursor = "grabbing";
+            render();
+            return;
+          }
+        }
+      }
       // Hit test in reverse (topmost first)
       const hit = [...scene.elements].reverse().find(el => hitTest(el, wx, wy));
       if (hit) {
@@ -1201,6 +1327,36 @@
       return;
     }
 
+    // Rotation handle cursor feedback
+    if (activeTool === "select" && selectedIds.size === 1 && !isDragging && !isRotating) {
+      const sel = scene.elements.find(e => selectedIds.has(e.id));
+      if (sel) {
+        const rh = getRotationHandlePos(sel);
+        if (Math.hypot(wx - rh.x, wy - rh.y) < 8 / vp.scale) {
+          canvas.style.cursor = "grab";
+        } else {
+          canvas.style.cursor = "default";
+        }
+      }
+    }
+
+    // Rotation dragging
+    if (isRotating && selectedIds.size === 1) {
+      const sel = scene.elements.find(e => selectedIds.has(e.id));
+      if (sel) {
+        const c = getCenter(sel);
+        const currentAngle = Math.atan2(wy - c.y, wx - c.x);
+        let newAngle = rotateOriginalAngle + (currentAngle - rotateStartAngle);
+        // Snap to 15° when Shift held
+        if (e.shiftKey) {
+          newAngle = Math.round(newAngle / (Math.PI / 12)) * (Math.PI / 12);
+        }
+        sel.angle = newAngle;
+      }
+      render();
+      return;
+    }
+
     if (isDragging && selectedIds.size) {
       const dx = wx - startX, dy = wy - startY;
       for (const el of scene.elements) {
@@ -1231,6 +1387,7 @@
       return;
     }
     if (eraserActive) { eraserActive = false; erasedIds = new Set(); return; }
+    if (isRotating) { isRotating = false; canvas.style.cursor = "default"; return; }
     if (isDragging) { isDragging = false; snapshot(); return; }
     if (!drawing) return;
     drawing = false;
@@ -1487,6 +1644,15 @@
       sb.querySelector("#font-size").value = String(fs);
     }
 
+    // Angle section — visible when an element is selected
+    const angleSec = document.getElementById("angle-section");
+    angleSec.style.display = sel ? "" : "none";
+    if (sel) {
+      const deg = Math.round((sel.angle || 0) * 180 / Math.PI);
+      sb.querySelector("#angle-slider").value = deg;
+      sb.querySelector("#angle-val").textContent = deg + "\u00B0";
+    }
+
     // Hide irrelevant sections for eraser/image
     const isEraserNoSel = activeTool === "eraser" && !sel;
     const isImageTool = activeTool === "image" || (sel && sel.type === "image");
@@ -1555,6 +1721,7 @@
       roughness,
       roundness,
       opacity,
+      angle: 0,
     };
     switch (activeTool) {
       case "rect":
