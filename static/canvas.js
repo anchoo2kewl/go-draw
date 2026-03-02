@@ -775,7 +775,28 @@
       case "text":     drawText(ctx, el); break;
       case "image":    drawImage(ctx, el); break;
     }
+    // Render inline text label for shapes
+    if (el.text && el.type !== "text") {
+      drawShapeText(ctx, el);
+    }
     ctx.restore();
+  }
+
+  function drawShapeText(ctx, el) {
+    const bb = getBBox(el);
+    const fs = el.fontSize || 16;
+    ctx.font = `${fs}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    ctx.fillStyle = el.strokeColor || "#1e1e2e";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    ctx.setLineDash([]);
+    const lines = el.text.split("\n");
+    const lineHeight = fs * 1.3;
+    const totalH = lines.length * lineHeight;
+    const startY = bb.y + bb.h / 2 - totalH / 2 + lineHeight / 2;
+    lines.forEach((line, i) => ctx.fillText(line, bb.x + bb.w / 2, startY + i * lineHeight));
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
   }
 
   function drawRect(ctx, el) {
@@ -1133,8 +1154,17 @@
     }
 
     if (activeTool === "text") {
+      e.preventDefault(); // prevent browser focus logic from stealing textarea focus
       commitTextInput();
-      startTextInput(wx, wy);
+      // If clicking on an existing element, edit its text
+      const hit = [...scene.elements].reverse().find(el => hitTest(el, wx, wy));
+      if (hit && hit.type === "text") {
+        startTextInputOnElement(hit);
+      } else if (hit && (hit.type === "rect" || hit.type === "ellipse")) {
+        startTextInputOnShape(hit);
+      } else {
+        startTextInput(wx, wy);
+      }
       return;
     }
 
@@ -1262,6 +1292,7 @@
 
   function onDblClick(e) {
     if (!IS_EDIT) return;
+    e.preventDefault();
     const { cx, cy } = getMousePos(e);
     const { x: wx, y: wy } = canvasToWorld(cx, cy);
     const hit = [...scene.elements].reverse().find(el => hitTest(el, wx, wy));
@@ -1269,6 +1300,11 @@
       selectedIds = new Set([hit.id]);
       commitTextInput();
       startTextInputOnElement(hit);
+    } else if (hit && (hit.type === "rect" || hit.type === "ellipse")) {
+      // Double-click on shape → edit label text inside
+      selectedIds = new Set([hit.id]);
+      commitTextInput();
+      startTextInputOnShape(hit);
     } else if (!hit) {
       // Double-click on empty canvas creates text
       setTool("text");
@@ -1583,13 +1619,13 @@
       color:${strokeColor}; background:transparent;
       border:1.5px dashed #3b82f6; outline:none; resize:none;
       padding:2px 4px; border-radius:3px;
-      line-height:1.3;
+      line-height:1.3; z-index:10;
     `;
     textInput.dataset.wx = wx;
     textInput.dataset.wy = wy;
     textInput.dataset.fs = fontSize;
     wrap.appendChild(textInput);
-    textInput.focus();
+    requestAnimationFrame(() => textInput && textInput.focus());
 
     textInput.addEventListener("keydown", e => {
       if (e.key === "Escape") { commitTextInput(); }
@@ -1614,25 +1650,72 @@
       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
       color:${el.strokeColor || strokeColor}; background:transparent;
       border:1.5px dashed #3b82f6; outline:none; resize:none;
-      padding:2px 4px; border-radius:3px; line-height:1.3;
+      padding:2px 4px; border-radius:3px; line-height:1.3; z-index:10;
     `;
     textInput.dataset.wx = el.x;
     textInput.dataset.wy = el.y;
     textInput.dataset.fs = el.fontSize || fontSize;
     wrap.appendChild(textInput);
-    textInput.focus();
+    requestAnimationFrame(() => textInput && textInput.focus());
+    textInput.addEventListener("keydown", e => { if (e.key === "Escape") commitTextInput(); });
+    textInput.addEventListener("blur", () => commitTextInput());
+  }
+
+  function startTextInputOnShape(el) {
+    // Edit text label inside a shape (rect, ellipse, etc.)
+    const bb = getBBox(el);
+    const cx = (bb.x + bb.w / 2) * vp.scale + vp.x;
+    const cy = (bb.y + bb.h / 2) * vp.scale + vp.y;
+    const wrap = canvas.parentElement;
+    const fs = el.fontSize || fontSize;
+    textInput = document.createElement("textarea");
+    textInput.value = el.text || "";
+    textInput.style.cssText = `
+      position:absolute; left:${cx}px; top:${cy}px;
+      transform:translate(-50%, -50%);
+      min-width:60px; min-height:${fs * 1.4}px;
+      max-width:${Math.max(80, Math.abs(bb.w) * vp.scale - 16)}px;
+      font-size:${fs * vp.scale}px;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      color:${el.strokeColor || strokeColor}; background:transparent;
+      border:1.5px dashed #3b82f6; outline:none; resize:none;
+      padding:2px 4px; border-radius:3px; line-height:1.3;
+      text-align:center; z-index:10;
+    `;
+    textInput.dataset.wx = bb.x + bb.w / 2;
+    textInput.dataset.wy = bb.y + bb.h / 2;
+    textInput.dataset.fs = fs;
+    textInput.dataset.shapeId = el.id;
+    wrap.appendChild(textInput);
+    requestAnimationFrame(() => textInput && textInput.focus());
     textInput.addEventListener("keydown", e => { if (e.key === "Escape") commitTextInput(); });
     textInput.addEventListener("blur", () => commitTextInput());
   }
 
   function commitTextInput() {
     if (!textInput) return;
-    const text = textInput.value.trim();
-    const wx = parseFloat(textInput.dataset.wx);
-    const wy = parseFloat(textInput.dataset.wy);
-    const fs = parseInt(textInput.dataset.fs);
-    textInput.remove();
-    textInput = null;
+    const ti = textInput;
+    textInput = null;  // null FIRST — prevents re-entrance via synchronous blur
+    const text = ti.value.trim();
+    const wx = parseFloat(ti.dataset.wx);
+    const wy = parseFloat(ti.dataset.wy);
+    const fs = parseInt(ti.dataset.fs);
+    const shapeId = ti.dataset.shapeId || "";
+    ti.remove();
+
+    // Shape label editing — update the shape's text property
+    if (shapeId) {
+      const shape = scene.elements.find(e => e.id === shapeId);
+      if (shape) {
+        snapshot();
+        shape.text = text;
+        shape.fontSize = fs;
+      }
+      render();
+      return;
+    }
+
+    // Standalone text — discard if empty
     if (!text) return;
     snapshot();
     // Measure width (rough)
