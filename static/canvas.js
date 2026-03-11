@@ -26,6 +26,7 @@
   let fillColor = "transparent";
   let strokeWidth = 2;
   let fontSize = 16;
+  let fontFamily = "sans-serif"; // "sans-serif" | "serif" | "mono" | "hand"
   let strokeStyle = "solid";   // "solid" | "dashed" | "dotted"
   let roughness = 0;           // 0=architect, 1=artist, 2=cartoonist
   let roundness = "sharp";     // "sharp" | "round"
@@ -51,6 +52,15 @@
 
   // ── Marquee selection ──────────────────────────────────────────────────
   let marquee = null; // { x, y, w, h } in world coords while dragging
+
+  // ── Font family map ─────────────────────────────────────────────────────
+  const FONT_CSS = {
+    "sans-serif": '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    "serif":      '"Georgia", "Times New Roman", serif',
+    "mono":       '"SFMono-Regular", "Consolas", "Liberation Mono", monospace',
+    "hand":       '"Segoe Print", "Comic Sans MS", cursive',
+  };
+  function fontCSS(ff) { return FONT_CSS[ff] || FONT_CSS["sans-serif"]; }
 
   // ── Dark mode ──────────────────────────────────────────────────────────
   let darkMode = localStorage.getItem("godraw-dark") === "true";
@@ -361,8 +371,14 @@
         </div>
       </div>
       <div class="sb-section" id="font-section" style="display:none">
-        <div class="sb-label">Font size</div>
+        <div class="sb-label">Font</div>
         <div class="sb-row">
+          <select id="font-family" style="flex:1;margin-right:6px">
+            <option value="sans-serif" selected>Sans-serif</option>
+            <option value="serif">Serif</option>
+            <option value="mono">Monospace</option>
+            <option value="hand">Handwriting</option>
+          </select>
           <select id="font-size">
             <option value="12">12</option>
             <option value="16" selected>16</option>
@@ -441,7 +457,8 @@
       });
     });
 
-    // Font size
+    // Font family + size
+    sb.querySelector("#font-family").addEventListener("change", e => setProp("fontFamily", e.target.value));
     sb.querySelector("#font-size").addEventListener("change", e => setProp("fontSize", parseInt(e.target.value)));
 
     // Angle slider
@@ -893,7 +910,7 @@
   function drawShapeText(ctx, el) {
     const bb = getBBox(el);
     const fs = el.fontSize || 16;
-    ctx.font = `${fs}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    ctx.font = `${fs}px ${fontCSS(el.fontFamily)}`;
     ctx.fillStyle = el.strokeColor || "#1e1e2e";
     ctx.textBaseline = "middle";
     ctx.textAlign = "center";
@@ -1036,7 +1053,7 @@
   }
 
   function drawText(ctx, el) {
-    ctx.font = `${el.fontSize || 16}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    ctx.font = `${el.fontSize || 16}px ${fontCSS(el.fontFamily)}`;
     ctx.fillStyle = el.strokeColor || "#1e1e2e";
     ctx.textBaseline = "top";
     const lines = (el.text || "").split("\n");
@@ -1685,6 +1702,7 @@
       case "roundness": roundness = value; break;
       case "opacity": opacity = value; break;
       case "fontSize": fontSize = value; break;
+      case "fontFamily": fontFamily = value; break;
     }
     // Apply to selected elements
     if (selectedIds.size) {
@@ -1715,6 +1733,7 @@
     const rn = sel ? (sel.roundness || "sharp") : roundness;
     const op = sel ? (sel.opacity ?? 100) : opacity;
     const fs = sel ? (sel.fontSize || 16) : fontSize;
+    const ff = sel ? (sel.fontFamily || "sans-serif") : fontFamily;
 
     // Stroke swatches
     sb.querySelectorAll("#stroke-swatches .swatch").forEach(b => {
@@ -1756,10 +1775,11 @@
 
     // Font size section — visible only for text tool or text element
     const fontSec = document.getElementById("font-section");
-    const showFont = activeTool === "text" || (sel && sel.type === "text");
+    const showFont = activeTool === "text" || (sel && (sel.type === "text" || sel.text));
     fontSec.style.display = showFont ? "" : "none";
     if (showFont) {
       sb.querySelector("#font-size").value = String(fs);
+      sb.querySelector("#font-family").value = ff;
     }
 
     // Angle section — visible when an element is selected
@@ -1936,7 +1956,7 @@
           svg += `  <rect x="${el.x}" y="${el.y}" width="${el.w}" height="${el.h}" rx="${r}" fill="${fc}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
           if (el.text) {
             const bb = getBBox(el);
-            svg += `  <text x="${bb.x+bb.w/2}" y="${bb.y+bb.h/2}" text-anchor="middle" dominant-baseline="central" font-size="${el.fontSize||16}" fill="${sc}" opacity="${op}"${rot}>${escHtml(el.text)}</text>\n`;
+            svg += `  <text x="${bb.x+bb.w/2}" y="${bb.y+bb.h/2}" text-anchor="middle" dominant-baseline="central" font-size="${el.fontSize||16}" font-family="${fontCSS(el.fontFamily)}" fill="${sc}" opacity="${op}"${rot}>${escHtml(el.text)}</text>\n`;
           }
           break;
         }
@@ -1944,7 +1964,7 @@
           const cx = el.x + el.w/2, cy = el.y + el.h/2;
           svg += `  <ellipse cx="${cx}" cy="${cy}" rx="${Math.abs(el.w/2)}" ry="${Math.abs(el.h/2)}" fill="${fc}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
           if (el.text) {
-            svg += `  <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" font-size="${el.fontSize||16}" fill="${sc}" opacity="${op}"${rot}>${escHtml(el.text)}</text>\n`;
+            svg += `  <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" font-size="${el.fontSize||16}" font-family="${fontCSS(el.fontFamily)}" fill="${sc}" opacity="${op}"${rot}>${escHtml(el.text)}</text>\n`;
           }
           break;
         }
@@ -1976,7 +1996,7 @@
           const lines = (el.text || "").split("\n");
           const lh = fs * 1.3;
           lines.forEach((line, i) => {
-            svg += `  <text x="${el.x}" y="${el.y + (i + 0.8) * lh}" font-size="${fs}" fill="${sc}" opacity="${op}" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif"${rot}>${escHtml(line)}</text>\n`;
+            svg += `  <text x="${el.x}" y="${el.y + (i + 0.8) * lh}" font-size="${fs}" fill="${sc}" opacity="${op}" font-family="${fontCSS(el.fontFamily)}"${rot}>${escHtml(line)}</text>\n`;
           });
           break;
         }
@@ -2094,7 +2114,7 @@
       position:absolute; left:${sx}px; top:${sy}px;
       min-width:80px; min-height:${fontSize * 1.4}px;
       font-size:${fontSize * vp.scale}px;
-      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      font-family:${fontCSS(fontFamily)};
       color:${strokeColor}; background:transparent;
       border:1.5px dashed #3b82f6; outline:none; resize:none;
       padding:2px 4px; border-radius:3px;
@@ -2103,6 +2123,7 @@
     textInput.dataset.wx = wx;
     textInput.dataset.wy = wy;
     textInput.dataset.fs = fontSize;
+    textInput.dataset.textFontFamily = fontFamily;
     wrap.appendChild(textInput);
     requestAnimationFrame(() => textInput && textInput.focus());
 
@@ -2126,7 +2147,7 @@
       position:absolute; left:${sx}px; top:${sy}px;
       min-width:80px; min-height:${(el.fontSize || 16) * 1.4}px;
       font-size:${(el.fontSize || 16) * vp.scale}px;
-      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      font-family:${fontCSS(el.fontFamily)};
       color:${el.strokeColor || strokeColor}; background:transparent;
       border:1.5px dashed #3b82f6; outline:none; resize:none;
       padding:2px 4px; border-radius:3px; line-height:1.3; z-index:10;
@@ -2137,6 +2158,7 @@
     textInput.dataset.textElementId = el.id;
     textInput.dataset.textStrokeColor = el.strokeColor || strokeColor;
     textInput.dataset.textOpacity = el.opacity != null ? el.opacity : opacity;
+    textInput.dataset.textFontFamily = el.fontFamily || fontFamily;
     wrap.appendChild(textInput);
     requestAnimationFrame(() => textInput && textInput.focus());
     textInput.addEventListener("keydown", e => { if (e.key === "Escape") commitTextInput(); });
@@ -2145,20 +2167,24 @@
 
   function startTextInputOnShape(el) {
     // Edit text label inside a shape (rect, ellipse, etc.)
+    // Hide the shape's text while editing to avoid double rendering
+    el._savedText = el.text || "";
+    el.text = "";
+    render();
     const bb = getBBox(el);
     const cx = (bb.x + bb.w / 2) * vp.scale + vp.x;
     const cy = (bb.y + bb.h / 2) * vp.scale + vp.y;
     const wrap = canvas.parentElement;
     const fs = el.fontSize || fontSize;
     textInput = document.createElement("textarea");
-    textInput.value = el.text || "";
+    textInput.value = el._savedText;
     textInput.style.cssText = `
       position:absolute; left:${cx}px; top:${cy}px;
       transform:translate(-50%, -50%);
       min-width:60px; min-height:${fs * 1.4}px;
       max-width:${Math.max(80, Math.abs(bb.w) * vp.scale - 16)}px;
       font-size:${fs * vp.scale}px;
-      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      font-family:${fontCSS(el.fontFamily)};
       color:${el.strokeColor || strokeColor}; background:transparent;
       border:1.5px dashed #3b82f6; outline:none; resize:none;
       padding:2px 4px; border-radius:3px; line-height:1.3;
@@ -2192,6 +2218,7 @@
         snapshot();
         shape.text = text;
         shape.fontSize = fs;
+        delete shape._savedText;
       }
       render();
       return;
@@ -2201,7 +2228,8 @@
     if (!text) { render(); return; }
     snapshot();
     // Measure width (rough)
-    ctx.font = `${fs}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    const ff = ti.dataset.textFontFamily || fontFamily;
+    ctx.font = `${fs}px ${fontCSS(ff)}`;
     const lines = text.split("\n");
     const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
     // Reuse original ID when editing existing text element
@@ -2210,7 +2238,7 @@
       id: existingId || uid(), type: "text",
       x: wx, y: wy,
       w: maxW, h: lines.length * fs * 1.3,
-      text, fontSize: fs,
+      text, fontSize: fs, fontFamily: ff,
       strokeColor: existingId ? (ti.dataset.textStrokeColor || strokeColor) : strokeColor,
       opacity: existingId ? parseFloat(ti.dataset.textOpacity) : opacity,
     });
@@ -2222,12 +2250,16 @@
     const status = document.getElementById("save-status");
     if (status) status.textContent = "Saving\u2026";
     try {
-      const res = await fetch(`${CFG.basePath}/${CFG.id}/save`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, scene }),
-      });
-      if (!res.ok) throw new Error(await res.text());
+      if (CFG.storage === "local") {
+        localStorage.setItem("godraw-local-scene", JSON.stringify({ title, scene }));
+      } else {
+        const res = await fetch(`${CFG.basePath}/${CFG.id}/save`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, scene }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+      }
       if (status) { status.textContent = "Saved \u2713"; setTimeout(() => { status.textContent = ""; }, 2000); }
     } catch (err) {
       if (status) status.textContent = "Error: " + err.message;
@@ -2237,9 +2269,15 @@
   // ── Load ──────────────────────────────────────────────────────────────────
   async function loadDrawing() {
     try {
-      const res = await fetch(`${CFG.basePath}/${CFG.id}/data`);
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const data = await res.json();
+      var data;
+      if (CFG.storage === "local") {
+        var raw = localStorage.getItem("godraw-local-scene");
+        data = raw ? JSON.parse(raw) : { title: "Untitled", scene: { version: 1, elements: [] } };
+      } else {
+        const res = await fetch(`${CFG.basePath}/${CFG.id}/data`);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        data = await res.json();
+      }
       title = data.title || "Untitled";
       scene = typeof data.scene === "string" ? JSON.parse(data.scene) : (data.scene || { version: 1, elements: [] });
       if (IS_EDIT) {
