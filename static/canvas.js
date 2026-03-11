@@ -3396,7 +3396,9 @@
   }
 
   function showLibraryPicker(libData) {
-    const items = (libData.libraryItems || libData.library || []);
+    let items = (libData.libraryItems || libData.library || []);
+    // Normalize old format: library: [[el1,el2], [el3]] → [{elements:[el1,el2]}, ...]
+    items = items.map(item => Array.isArray(item) ? { elements: item, name: "" } : item);
     if (!items.length) return;
 
     const { overlay, modal } = openModal(`
@@ -3481,7 +3483,7 @@
   // ── Excalidraw Library Browser ───────────────────────────────────────────
   const LIB_CATALOG_URL = "https://libraries.excalidraw.com/libraries.json";
   const LIB_BASE_URL = "https://libraries.excalidraw.com/libraries/";
-  const LIB_PREVIEW_URL = "https://libraries.excalidraw.com/previews/";
+  // Preview images live alongside source files under /libraries/
   let libCatalogCache = null;
 
   async function openLibraryBrowser() {
@@ -3550,7 +3552,7 @@
         const img = document.createElement("img");
         img.className = "lib-browser-img";
         img.loading = "lazy";
-        img.src = LIB_PREVIEW_URL + lib.preview;
+        img.src = LIB_BASE_URL + lib.preview;
         img.alt = lib.name;
         img.onerror = () => { img.style.display = "none"; };
         card.appendChild(img);
