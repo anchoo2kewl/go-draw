@@ -59,6 +59,11 @@ func main() {
 		fmt.Fprintln(w, "ok")
 	})
 
+	// Favicon at root — redirect to the embedded SVG
+	http.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/draw/favicon.ico", http.StatusMovedPermanently)
+	})
+
 	// Root serves the canvas directly with localStorage persistence
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -80,6 +85,7 @@ var canvasTmpl = template.Must(template.New("canvas-local").Parse(`<!DOCTYPE htm
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>draw.biswas.me</title>
+<link rel="icon" type="image/svg+xml" href="/draw/static/favicon.svg">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:100%;height:100%;overflow:hidden;background:#f4f4f5}
