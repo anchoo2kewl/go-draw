@@ -24,6 +24,12 @@ func init() {
 	canvasHash = fmt.Sprintf("%x", h[:4])
 }
 
+// FaviconSVG returns the raw bytes of the embedded favicon SVG.
+func FaviconSVG() []byte {
+	data, _ := staticFS.ReadFile("static/favicon.svg")
+	return data
+}
+
 // canvasTmpl inlines the drawing page. It loads canvas.js from the static
 // directory and passes the mode ("edit" | "view") and drawing id to JS.
 var canvasTmpl = template.Must(template.New("canvas").Parse(`<!DOCTYPE html>

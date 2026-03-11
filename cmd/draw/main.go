@@ -59,9 +59,12 @@ func main() {
 		fmt.Fprintln(w, "ok")
 	})
 
-	// Favicon at root — redirect to the embedded SVG
+	// Favicon at root — serve the embedded SVG directly
+	faviconData := godraw.FaviconSVG()
 	http.HandleFunc("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/draw/favicon.ico", http.StatusMovedPermanently)
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(faviconData)
 	})
 
 	// Root serves the canvas directly with localStorage persistence
