@@ -1,0 +1,40 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 31.97.102.48
+          username: ubuntu
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            set -e
+            cd ~/go-draw
+
+            echo "==> Pulling latest changes..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "==> Building and starting containers..."
+            docker compose build --no-cache
+            docker compose up -d
+
+            echo "==> Waiting for health check..."
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:8090/health > /dev/null 2>&1; then
+                echo "==> Health check passed!"
+                exit 0
+              fi
+              sleep 1
+            done
+
+            echo "==> Health check failed!"
+            docker compose logs --tail=50
+            exit 1

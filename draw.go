@@ -36,6 +36,7 @@ type Draw struct {
 	basePath      string
 	maxSceneBytes int64
 	uploadDir     string
+	collabEnabled bool
 }
 
 // New creates a Draw instance with the provided options.

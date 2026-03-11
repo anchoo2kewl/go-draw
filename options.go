@@ -39,3 +39,12 @@ func WithUploadDir(dir string) Option {
 		d.uploadDir = dir
 	}
 }
+
+// WithCollabEnabled enables real-time collaboration features.
+// When enabled, the canvas page includes collab.js for WebSocket-based
+// collaboration with E2E encryption. Defaults to false.
+func WithCollabEnabled(enabled bool) Option {
+	return func(d *Draw) {
+		d.collabEnabled = enabled
+	}
+}

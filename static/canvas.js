@@ -46,6 +46,15 @@
   let rotateOriginalAngle = 0;
   let textInput = null;
 
+  // ── Clipboard (internal copy/paste) ──────────────────────────────────────
+  let clipboardElements = [];
+
+  // ── Marquee selection ──────────────────────────────────────────────────
+  let marquee = null; // { x, y, w, h } in world coords while dragging
+
+  // ── Dark mode ──────────────────────────────────────────────────────────
+  let darkMode = localStorage.getItem("godraw-dark") === "true";
+
   // ── Eraser state ─────────────────────────────────────────────────────────
   let eraserActive = false;
   let erasedIds = new Set();
@@ -69,6 +78,7 @@
   const UNDO_LIMIT = 60;
 
   let autoSaveTimer = null;
+  let collabSyncTimer = null;
   function snapshot() {
     undoStack.push(JSON.stringify(scene.elements));
     if (undoStack.length > UNDO_LIMIT) undoStack.shift();
@@ -77,6 +87,13 @@
     if (IS_EDIT) {
       clearTimeout(autoSaveTimer);
       autoSaveTimer = setTimeout(saveDrawing, 2000);
+    }
+    // Broadcast changes to collab peers (debounced)
+    if (CFG.collabEnabled && window.GodrawCollab && window.GodrawCollab.isConnected()) {
+      clearTimeout(collabSyncTimer);
+      collabSyncTimer = setTimeout(() => {
+        window.GodrawCollab.sendElementUpdate(scene.elements);
+      }, 100);
     }
   }
 
@@ -134,6 +151,7 @@
         <div class="top-right">
           <button id="btn-undo" title="Undo (Ctrl+Z)">\u21A9</button>
           <button id="btn-redo" title="Redo (Ctrl+Y)">\u21AA</button>
+          <button id="btn-share" title="Share" class="btn-share">\uD83D\uDD17 Share</button>
           <button id="btn-save" title="Save (Ctrl+S)">\uD83D\uDCBE Save</button>
           <span id="save-status"></span>
         </div>
@@ -154,6 +172,9 @@
 
       const moreMenu = el("div", { id: "more-menu" });
       moreMenu.innerHTML = `
+        <button id="btn-export-png">\uD83D\uDDBC Export PNG</button>
+        <button id="btn-export-svg">\uD83D\uDCC4 Export SVG</button>
+        <hr style="margin:4px 0;border:none;border-top:1px solid #e0e0e0;">
         <button id="btn-mermaid-import">Mermaid \u2192 Draw</button>
         <button id="btn-mermaid-export">Draw \u2192 Mermaid</button>
       `;
@@ -167,12 +188,15 @@
         moreMenu.classList.toggle("open");
       });
       document.addEventListener("click", () => moreMenu.classList.remove("open"));
+      moreMenu.querySelector("#btn-export-png").addEventListener("click", () => { moreMenu.classList.remove("open"); exportPNG(); });
+      moreMenu.querySelector("#btn-export-svg").addEventListener("click", () => { moreMenu.classList.remove("open"); exportSVG(); });
       moreMenu.querySelector("#btn-mermaid-import").addEventListener("click", () => { moreMenu.classList.remove("open"); openMermaidImport(); });
       moreMenu.querySelector("#btn-mermaid-export").addEventListener("click", () => { moreMenu.classList.remove("open"); openMermaidExport(); });
 
       // Wire topbar controls
       topbar.querySelector("#btn-undo").addEventListener("click", undo);
       topbar.querySelector("#btn-redo").addEventListener("click", redo);
+      topbar.querySelector("#btn-share").addEventListener("click", openShareDialog);
       topbar.querySelector("#btn-save").addEventListener("click", saveDrawing);
       topbar.querySelector("#title-input").addEventListener("input", e => { title = e.target.value; });
       toolbar.addEventListener("click", e => {
@@ -445,6 +469,12 @@
     fsBtn.addEventListener("click", toggleFullscreen);
     bar.appendChild(fsBtn);
 
+    // Dark mode toggle
+    const dmBtn = el("button", { id: "btn-dark-mode", title: "Toggle dark mode" });
+    dmBtn.innerHTML = darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19';
+    dmBtn.addEventListener("click", toggleDarkMode);
+    bar.appendChild(dmBtn);
+
     // New canvas button (in embedded mode or always available)
     const newBtn = el("button", { id: "btn-new-canvas", title: "New canvas" });
     newBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>';
@@ -556,6 +586,8 @@
       .tool-num { position:absolute; bottom:0; right:1px; font-size:8px; line-height:1; opacity:0.55; pointer-events:none; font-family:monospace; }
       .top-right button { background:#f4f4f5; border:none; border-radius:6px; padding:5px 10px; cursor:pointer; font-size:.85rem; }
       .top-right button:hover { background:#e4e4e7; }
+      .btn-share { background:#6366f1 !important; color:#fff !important; font-weight:600; }
+      .btn-share:hover { background:#5558e6 !important; }
       #btn-save { background:#1e1e2e; color:#fff; font-weight:600; }
       #btn-save:hover { background:#333; }
       #save-status { font-size:.75rem; color:#888; }
@@ -616,6 +648,37 @@
       .godraw-modal .modal-btn-primary { background:#1e1e2e; color:#fff; }
       .godraw-modal .modal-btn-primary:hover { background:#333; }
       .godraw-modal .modal-btn-secondary { background:#f0f0f0; color:#333; }
+
+      /* Dark mode */
+      .godraw-dark #topbar { background:#1e1e2e; border-bottom-color:#333; }
+      .godraw-dark #title-input { background:#2a2a3e; color:#e0e0e0; border-color:#444; }
+      .godraw-dark #title-input:focus { border-color:#6366f1; }
+      .godraw-dark #toolbar { background:#2a2a3e; }
+      .godraw-dark #toolbar .tool-btn { color:#bbb; }
+      .godraw-dark #toolbar .tool-btn:hover { background:#3a3a4e; }
+      .godraw-dark .top-right button { background:#2a2a3e; color:#ccc; }
+      .godraw-dark .top-right button:hover { background:#3a3a4e; }
+      .godraw-dark #btn-save { background:#6366f1; color:#fff; }
+      .godraw-dark #btn-save:hover { background:#5558e6; }
+      .godraw-dark #sidebar { background:#1e1e2e; border-right-color:#333; }
+      .godraw-dark .sb-label { color:#777; }
+      .godraw-dark .sb-section { border-bottom-color:#2a2a3e; }
+      .godraw-dark .sb-btn { color:#bbb; }
+      .godraw-dark .sb-btn:hover { background:#2a2a3e; }
+      .godraw-dark .sb-btn.active { background:#3a3a4e; border-color:#555; color:#e0e0e0; }
+      .godraw-dark #canvas-wrap { background:#1a1a2e; }
+      .godraw-dark #godraw-fab button { background:rgba(30,30,46,0.92); color:#ccc; }
+      .godraw-dark #godraw-fab button:hover { background:#2a2a3e; }
+      .godraw-dark #more-menu { background:#1e1e2e; border-color:#333; }
+      .godraw-dark #more-menu button { color:#ccc; }
+      .godraw-dark #more-menu button:hover { background:#2a2a3e; }
+      .godraw-dark .godraw-modal { background:#1e1e2e; color:#e0e0e0; }
+      .godraw-dark .godraw-modal textarea { background:#2a2a3e; color:#e0e0e0; border-color:#444; }
+      .godraw-dark .godraw-modal .modal-btn-secondary { background:#2a2a3e; color:#ccc; }
+      .godraw-dark #sidebar input[type=color] { border-color:#444; }
+      .godraw-dark #sidebar select { background:#2a2a3e; color:#e0e0e0; border-color:#444; }
+      .godraw-dark #sidebar input[type=range] { accent-color:#6366f1; }
+      .godraw-dark #save-status { color:#666; }
 
       /* Responsive: collapse sidebar */
       @media (max-width:580px) {
@@ -716,14 +779,14 @@
     ctx.clearRect(0, 0, W, H);
 
     // Background
-    ctx.fillStyle = "#f8f8f8";
+    ctx.fillStyle = darkMode ? "#1a1a2e" : "#f8f8f8";
     ctx.fillRect(0, 0, W, H);
 
     // Dot grid
     const gs = GRID_SIZE * vp.scale;
     const offX = ((vp.x % gs) + gs) % gs;
     const offY = ((vp.y % gs) + gs) % gs;
-    ctx.fillStyle = "#d4d4d8";
+    ctx.fillStyle = darkMode ? "#3a3a5c" : "#d4d4d8";
     for (let x = offX; x < W; x += gs) {
       for (let y = offY; y < H; y += gs) {
         ctx.beginPath();
@@ -750,6 +813,19 @@
       for (const el of scene.elements) {
         if (selectedIds.has(el.id)) drawSelection(ctx, el);
       }
+    }
+
+    // Marquee selection rectangle
+    if (marquee) {
+      ctx.save();
+      ctx.fillStyle = "rgba(99, 102, 241, 0.08)";
+      ctx.strokeStyle = "#6366f1";
+      ctx.lineWidth = 1 / vp.scale;
+      ctx.setLineDash([4 / vp.scale, 4 / vp.scale]);
+      ctx.fillRect(marquee.x, marquee.y, marquee.w, marquee.h);
+      ctx.strokeRect(marquee.x, marquee.y, marquee.w, marquee.h);
+      ctx.setLineDash([]);
+      ctx.restore();
     }
 
     ctx.restore();
@@ -1214,14 +1290,20 @@
       // Hit test in reverse (topmost first)
       const hit = [...scene.elements].reverse().find(el => hitTest(el, wx, wy));
       if (hit) {
-        if (!selectedIds.has(hit.id)) {
+        if (e.shiftKey) {
+          // Shift+click: toggle element in/out of selection
+          selectedIds = new Set(selectedIds);
+          if (selectedIds.has(hit.id)) selectedIds.delete(hit.id);
+          else selectedIds.add(hit.id);
+        } else if (!selectedIds.has(hit.id)) {
           selectedIds = new Set([hit.id]);
         }
         isDragging = true;
-        const bb = getBBox(hit);
-        dragOffset = { x: wx - bb.x, y: wy - bb.y };
+        dragOffset = { x: wx - startX, y: wy - startY };
       } else {
-        selectedIds.clear();
+        if (!e.shiftKey) selectedIds.clear();
+        // Start marquee selection on empty area
+        marquee = { x: wx, y: wy, w: 0, h: 0 };
       }
       render();
       return;
@@ -1313,6 +1395,11 @@
     const { cx, cy } = getMousePos(e);
     const { x: wx, y: wy } = canvasToWorld(cx, cy);
 
+    // Broadcast cursor position to collab peers
+    if (CFG.collabEnabled && window.GodrawCollab) {
+      window.GodrawCollab.sendCursorPosition(wx, wy);
+    }
+
     // Track eraser cursor position for visual feedback
     if (activeTool === "eraser") {
       eraserCursorPos = { cx, cy };
@@ -1368,6 +1455,14 @@
       return;
     }
 
+    // Marquee drag update
+    if (marquee) {
+      marquee.w = wx - marquee.x;
+      marquee.h = wy - marquee.y;
+      render();
+      return;
+    }
+
     if (!drawing) return;
     updateElement(currentEl, wx, wy);
     if (activeTool === "pencil") {
@@ -1389,6 +1484,25 @@
     if (eraserActive) { eraserActive = false; erasedIds = new Set(); return; }
     if (isRotating) { isRotating = false; canvas.style.cursor = "default"; return; }
     if (isDragging) { isDragging = false; snapshot(); return; }
+    if (marquee) {
+      // Select all elements intersecting the marquee rectangle
+      const mx = Math.min(marquee.x, marquee.x + marquee.w);
+      const my = Math.min(marquee.y, marquee.y + marquee.h);
+      const mw = Math.abs(marquee.w);
+      const mh = Math.abs(marquee.h);
+      if (mw > 2 || mh > 2) {
+        for (const el of scene.elements) {
+          const bb = getBBox(el);
+          // Element intersects marquee if bounding boxes overlap
+          if (bb.x + bb.w >= mx && bb.x <= mx + mw && bb.y + bb.h >= my && bb.y <= my + mh) {
+            selectedIds.add(el.id);
+          }
+        }
+      }
+      marquee = null;
+      render();
+      return;
+    }
     if (!drawing) return;
     drawing = false;
     if (currentEl) {
@@ -1416,6 +1530,10 @@
     if (mod && (e.key === "y" || (e.shiftKey && e.key === "z"))) { e.preventDefault(); redo(); }
     if (mod && e.key === "s") { e.preventDefault(); saveDrawing(); }
     if (mod && (e.key === "d" || e.key === "D")) { e.preventDefault(); duplicateSelected(); }
+    if (mod && e.key === "c") { e.preventDefault(); copySelected(); }
+    if (mod && e.key === "v") { e.preventDefault(); pasteClipboard(); }
+    if (mod && e.key === "x") { e.preventDefault(); cutSelected(); }
+    if (mod && e.key === "a") { e.preventDefault(); selectAll(); }
     if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
     if (e.key === "h" || e.key === "H") setTool("hand");
     if (e.key === "v" || e.key === "V" || e.key === "1") setTool("select");
@@ -1700,6 +1818,200 @@
     render();
   }
 
+  // ── Copy / Paste / Cut ──────────────────────────────────────────────────
+  function copySelected() {
+    if (!selectedIds.size) return;
+    clipboardElements = scene.elements
+      .filter(el => selectedIds.has(el.id))
+      .map(el => JSON.parse(JSON.stringify(el)));
+  }
+
+  function pasteClipboard() {
+    if (!clipboardElements.length) return;
+    snapshot();
+    const newIds = new Set();
+    for (const el of clipboardElements) {
+      const clone = JSON.parse(JSON.stringify(el));
+      clone.id = uid();
+      if (clone.x !== undefined) { clone.x += 20; clone.y += 20; }
+      if (clone.x2 !== undefined) { clone.x2 += 20; clone.y2 += 20; }
+      if (clone.pts) { clone.pts = clone.pts.map(p => ({ x: p.x + 20, y: p.y + 20 })); }
+      scene.elements.push(clone);
+      newIds.add(clone.id);
+    }
+    // Update clipboard to offset again on next paste
+    clipboardElements = clipboardElements.map(el => {
+      const c = JSON.parse(JSON.stringify(el));
+      if (c.x !== undefined) { c.x += 20; c.y += 20; }
+      if (c.x2 !== undefined) { c.x2 += 20; c.y2 += 20; }
+      if (c.pts) { c.pts = c.pts.map(p => ({ x: p.x + 20, y: p.y + 20 })); }
+      return c;
+    });
+    selectedIds = newIds;
+    render();
+  }
+
+  function cutSelected() {
+    copySelected();
+    deleteSelected();
+  }
+
+  function selectAll() {
+    selectedIds = new Set(scene.elements.map(el => el.id));
+    render();
+  }
+
+  // ── Export PNG ──────────────────────────────────────────────────────────
+  function exportPNG() {
+    if (!scene.elements.length) return;
+    const pad = 20;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const el of scene.elements) {
+      const bb = getBBox(el);
+      minX = Math.min(minX, bb.x);
+      minY = Math.min(minY, bb.y);
+      maxX = Math.max(maxX, bb.x + bb.w);
+      maxY = Math.max(maxY, bb.y + bb.h);
+    }
+    const w = maxX - minX + pad * 2;
+    const h = maxY - minY + pad * 2;
+    const offCanvas = document.createElement("canvas");
+    const dpr = window.devicePixelRatio || 1;
+    offCanvas.width = w * dpr;
+    offCanvas.height = h * dpr;
+    const offCtx = offCanvas.getContext("2d");
+    offCtx.scale(dpr, dpr);
+    // White background
+    offCtx.fillStyle = darkMode ? "#1a1a2e" : "#ffffff";
+    offCtx.fillRect(0, 0, w, h);
+    offCtx.translate(-minX + pad, -minY + pad);
+    for (const el of scene.elements) {
+      drawElement(offCtx, el);
+    }
+    offCanvas.toBlob(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = (title || "drawing") + ".png";
+      a.click();
+      URL.revokeObjectURL(url);
+    }, "image/png");
+  }
+
+  // ── Export SVG ──────────────────────────────────────────────────────────
+  function exportSVG() {
+    if (!scene.elements.length) return;
+    const pad = 20;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const el of scene.elements) {
+      const bb = getBBox(el);
+      minX = Math.min(minX, bb.x);
+      minY = Math.min(minY, bb.y);
+      maxX = Math.max(maxX, bb.x + bb.w);
+      maxY = Math.max(maxY, bb.y + bb.h);
+    }
+    const w = maxX - minX + pad * 2;
+    const h = maxY - minY + pad * 2;
+    const ox = -minX + pad;
+    const oy = -minY + pad;
+
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">\n`;
+    svg += `<rect width="${w}" height="${h}" fill="${darkMode ? '#1a1a2e' : '#ffffff'}"/>\n`;
+    svg += `<g transform="translate(${ox},${oy})">\n`;
+
+    for (const el of scene.elements) {
+      const sc = el.strokeColor || "#1e1e2e";
+      const fc = el.fillColor || "transparent";
+      const sw = el.strokeWidth || 2;
+      const op = (el.opacity ?? 100) / 100;
+      const angle = el.angle || 0;
+      const dashArray = el.strokeStyle === "dashed" ? `${sw*4},${sw*3}` : el.strokeStyle === "dotted" ? `${sw*0.5},${sw*2.5}` : "";
+      const dash = dashArray ? ` stroke-dasharray="${dashArray}"` : "";
+      const rot = angle ? (() => { const c = getCenter(el); return ` transform="rotate(${angle*180/Math.PI},${c.x},${c.y})"`; })() : "";
+
+      switch (el.type) {
+        case "rect": {
+          const rn = el.roundness || "sharp";
+          const r = rn === "round" ? Math.min(Math.abs(el.w), Math.abs(el.h)) * 0.15 : 0;
+          svg += `  <rect x="${el.x}" y="${el.y}" width="${el.w}" height="${el.h}" rx="${r}" fill="${fc}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
+          if (el.text) {
+            const bb = getBBox(el);
+            svg += `  <text x="${bb.x+bb.w/2}" y="${bb.y+bb.h/2}" text-anchor="middle" dominant-baseline="central" font-size="${el.fontSize||16}" fill="${sc}" opacity="${op}"${rot}>${escHtml(el.text)}</text>\n`;
+          }
+          break;
+        }
+        case "ellipse": {
+          const cx = el.x + el.w/2, cy = el.y + el.h/2;
+          svg += `  <ellipse cx="${cx}" cy="${cy}" rx="${Math.abs(el.w/2)}" ry="${Math.abs(el.h/2)}" fill="${fc}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
+          if (el.text) {
+            svg += `  <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" font-size="${el.fontSize||16}" fill="${sc}" opacity="${op}"${rot}>${escHtml(el.text)}</text>\n`;
+          }
+          break;
+        }
+        case "line":
+          svg += `  <line x1="${el.x}" y1="${el.y}" x2="${el.x2}" y2="${el.y2}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
+          break;
+        case "arrow": {
+          const dx = el.x2 - el.x, dy = el.y2 - el.y;
+          const len = Math.hypot(dx, dy);
+          const ux = len ? dx/len : 0, uy = len ? dy/len : 0;
+          const headLen = Math.min(12, len * 0.3);
+          const ax1 = el.x2 - headLen * ux + headLen * 0.4 * uy;
+          const ay1 = el.y2 - headLen * uy - headLen * 0.4 * ux;
+          const ax2 = el.x2 - headLen * ux - headLen * 0.4 * uy;
+          const ay2 = el.y2 - headLen * uy + headLen * 0.4 * ux;
+          svg += `  <line x1="${el.x}" y1="${el.y}" x2="${el.x2}" y2="${el.y2}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
+          svg += `  <polygon points="${el.x2},${el.y2} ${ax1},${ay1} ${ax2},${ay2}" fill="${sc}" opacity="${op}"${rot}/>\n`;
+          break;
+        }
+        case "pencil":
+          if (el.pts && el.pts.length > 1) {
+            let d = `M${el.pts[0].x},${el.pts[0].y}`;
+            for (let i = 1; i < el.pts.length; i++) d += ` L${el.pts[i].x},${el.pts[i].y}`;
+            svg += `  <path d="${d}" fill="none" stroke="${sc}" stroke-width="${sw}" opacity="${op}" stroke-linecap="round" stroke-linejoin="round"${dash}${rot}/>\n`;
+          }
+          break;
+        case "text": {
+          const fs = el.fontSize || 16;
+          const lines = (el.text || "").split("\n");
+          const lh = fs * 1.3;
+          lines.forEach((line, i) => {
+            svg += `  <text x="${el.x}" y="${el.y + (i + 0.8) * lh}" font-size="${fs}" fill="${sc}" opacity="${op}" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif"${rot}>${escHtml(line)}</text>\n`;
+          });
+          break;
+        }
+        case "image":
+          if (el.src) {
+            svg += `  <image href="${el.src}" x="${el.x}" y="${el.y}" width="${el.w}" height="${el.h}" opacity="${op}"${rot}/>\n`;
+          }
+          break;
+      }
+    }
+    svg += `</g>\n</svg>`;
+
+    const blob = new Blob([svg], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (title || "drawing") + ".svg";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Dark mode ──────────────────────────────────────────────────────────
+  function toggleDarkMode() {
+    darkMode = !darkMode;
+    localStorage.setItem("godraw-dark", darkMode);
+    applyDarkMode();
+    render();
+  }
+
+  function applyDarkMode() {
+    document.documentElement.classList.toggle("godraw-dark", darkMode);
+    const btn = document.getElementById("btn-dark-mode");
+    if (btn) btn.innerHTML = darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19';
+  }
+
   // ── Copy link ─────────────────────────────────────────────────────────────
   function copyLink() {
     const url = window.location.origin + `${CFG.basePath}/${CFG.id}`;
@@ -1802,7 +2114,7 @@
   }
 
   function startTextInputOnElement(el) {
-    // Edit existing text element
+    // Edit existing text element — store original ID to update in place
     scene.elements = scene.elements.filter(e => e.id !== el.id);
     render();
     const sx = el.x * vp.scale + vp.x;
@@ -1822,6 +2134,9 @@
     textInput.dataset.wx = el.x;
     textInput.dataset.wy = el.y;
     textInput.dataset.fs = el.fontSize || fontSize;
+    textInput.dataset.textElementId = el.id;
+    textInput.dataset.textStrokeColor = el.strokeColor || strokeColor;
+    textInput.dataset.textOpacity = el.opacity != null ? el.opacity : opacity;
     wrap.appendChild(textInput);
     requestAnimationFrame(() => textInput && textInput.focus());
     textInput.addEventListener("keydown", e => { if (e.key === "Escape") commitTextInput(); });
@@ -1883,19 +2198,21 @@
     }
 
     // Standalone text — discard if empty
-    if (!text) return;
+    if (!text) { render(); return; }
     snapshot();
     // Measure width (rough)
     ctx.font = `${fs}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
     const lines = text.split("\n");
     const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
+    // Reuse original ID when editing existing text element
+    const existingId = ti.dataset.textElementId || "";
     scene.elements.push({
-      id: uid(), type: "text",
+      id: existingId || uid(), type: "text",
       x: wx, y: wy,
       w: maxW, h: lines.length * fs * 1.3,
       text, fontSize: fs,
-      strokeColor,
-      opacity,
+      strokeColor: existingId ? (ti.dataset.textStrokeColor || strokeColor) : strokeColor,
+      opacity: existingId ? parseFloat(ti.dataset.textOpacity) : opacity,
     });
     render();
   }
@@ -2015,6 +2332,62 @@
 
   function closeModal(overlay) {
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+  }
+
+  // ── Share dialog ───────────────────────────────────────────────────────
+  function openShareDialog() {
+    const origin = window.location.origin;
+    const viewUrl = `${origin}${CFG.basePath}/${CFG.id}`;
+    const editUrl = `${origin}${CFG.basePath}/${CFG.id}/edit`;
+    const collabUrl = editUrl + (window.location.hash || "");
+    const embedCode = `<iframe src="${viewUrl}" width="100%" height="500" style="border:none;border-radius:8px;" loading="lazy" allowfullscreen></iframe>`;
+
+    const { overlay, modal } = openModal(`
+      <h3>Share Drawing</h3>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div>
+          <label style="font-size:.75rem;color:#888;display:block;margin-bottom:4px;">View-only link</label>
+          <div style="display:flex;gap:6px;">
+            <input type="text" id="share-view-url" value="${escHtml(viewUrl)}" readonly
+              style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;background:#f8f8f8;" />
+            <button class="modal-btn modal-btn-primary share-copy-btn" data-target="share-view-url">Copy</button>
+          </div>
+        </div>
+        ${CFG.collabEnabled ? `
+        <div>
+          <label style="font-size:.75rem;color:#888;display:block;margin-bottom:4px;">Collaborate link (with encryption key)</label>
+          <div style="display:flex;gap:6px;">
+            <input type="text" id="share-collab-url" value="${escHtml(collabUrl)}" readonly
+              style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;background:#f8f8f8;" />
+            <button class="modal-btn modal-btn-primary share-copy-btn" data-target="share-collab-url">Copy</button>
+          </div>
+        </div>` : ""}
+        <div>
+          <label style="font-size:.75rem;color:#888;display:block;margin-bottom:4px;">Embed code</label>
+          <div style="display:flex;gap:6px;">
+            <input type="text" id="share-embed-code" value="${escHtml(embedCode)}" readonly
+              style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;background:#f8f8f8;font-family:monospace;" />
+            <button class="modal-btn modal-btn-primary share-copy-btn" data-target="share-embed-code">Copy</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-secondary" id="share-close">Close</button>
+      </div>
+    `);
+
+    modal.querySelector("#share-close").addEventListener("click", () => closeModal(overlay));
+    modal.querySelectorAll(".share-copy-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const input = modal.querySelector("#" + btn.dataset.target);
+        if (input) {
+          navigator.clipboard.writeText(input.value).then(() => {
+            btn.textContent = "Copied!";
+            setTimeout(() => btn.textContent = "Copy", 1500);
+          }).catch(() => {});
+        }
+      });
+    });
   }
 
   // ── Mermaid → Draw (Import) ──────────────────────────────────────────────
@@ -2365,8 +2738,41 @@
     return out;
   }
 
+  // ── Collaboration hooks (standalone-app only) ───────────────────────────
+  // Expose getters for collab.js
+  window._godrawGetViewport = () => ({ x: vp.x, y: vp.y, scale: vp.scale });
+  window._godrawGetScene = () => JSON.parse(JSON.stringify(scene));
+
+  // Receive handler for incoming collab updates
+  window._godrawCollabReceive = (type, payload) => {
+    switch (type) {
+      case "element_update":
+        if (payload.elements) {
+          for (const incoming of payload.elements) {
+            const idx = scene.elements.findIndex(e => e.id === incoming.id);
+            if (idx >= 0) {
+              scene.elements[idx] = incoming;
+            } else {
+              scene.elements.push(incoming);
+            }
+          }
+          render();
+        }
+        break;
+      case "scene_sync":
+        // Full scene sync from another peer — only apply if our scene is empty
+        if (payload.elements && scene.elements.length === 0) {
+          scene = payload;
+          render();
+        }
+        break;
+    }
+  };
+
+
   // ── Init ──────────────────────────────────────────────────────────────────
   buildUI();
+  applyDarkMode();
 
   // Center viewport initially
   vp.x = canvas.width / 2;

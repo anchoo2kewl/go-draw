@@ -44,10 +44,12 @@ html,body{width:100%;height:100%;overflow:hidden;background:#f4f4f5}
   window.GODRAW_CONFIG = {
     mode:     {{.Mode | js}},
     id:       {{.ID | js}},
-    basePath: {{.BasePath | js}}
+    basePath: {{.BasePath | js}},
+    collabEnabled: {{.CollabEnabled | js}}
   };
 </script>
 <script data-cfasync="false" src="{{.BasePath}}/static/canvas.js?v={{.Version}}"></script>
+{{if eq .CollabEnabled "true"}}<script data-cfasync="false" src="{{.BasePath}}/static/collab.js?v={{.Version}}"></script>{{end}}
 </body>
 </html>`))
 
@@ -55,10 +57,24 @@ func serveCanvas(w http.ResponseWriter, r *http.Request, id, basePath, mode stri
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	canvasTmpl.Execute(w, map[string]string{
-		"Mode":     mode,
-		"ID":       id,
-		"BasePath": basePath,
-		"Version":  canvasHash,
+		"Mode":          mode,
+		"ID":            id,
+		"BasePath":      basePath,
+		"Version":       canvasHash,
+		"CollabEnabled": "false",
+	})
+}
+
+// serveCanvasWithCollab serves the canvas page with collaboration enabled.
+func serveCanvasWithCollab(w http.ResponseWriter, r *http.Request, id, basePath, mode string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	canvasTmpl.Execute(w, map[string]string{
+		"Mode":          mode,
+		"ID":            id,
+		"BasePath":      basePath,
+		"Version":       canvasHash,
+		"CollabEnabled": "true",
 	})
 }
 

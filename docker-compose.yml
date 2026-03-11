@@ -1,0 +1,17 @@
+services:
+  godraw:
+    build: .
+    container_name: godraw
+    ports:
+      - "8090:8090"
+    volumes:
+      - godraw-data:/data
+    environment:
+      - PORT=8090
+      - DATA_DIR=/data/drawings
+      - UPLOAD_DIR=/data/uploads
+    restart: unless-stopped
+
+volumes:
+  godraw-data:
+    external: true

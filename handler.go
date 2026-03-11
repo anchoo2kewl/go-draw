@@ -363,7 +363,11 @@ func (d *Draw) handleEditor(w http.ResponseWriter, r *http.Request, id string) {
 		http.NotFound(w, r)
 		return
 	}
-	serveCanvas(w, r, id, d.basePath, "edit")
+	if d.collabEnabled {
+		serveCanvasWithCollab(w, r, id, d.basePath, "edit")
+	} else {
+		serveCanvas(w, r, id, d.basePath, "edit")
+	}
 }
 
 // ── Viewer ────────────────────────────────────────────────────────────────────
@@ -374,7 +378,11 @@ func (d *Draw) handleViewer(w http.ResponseWriter, r *http.Request, id string) {
 		http.NotFound(w, r)
 		return
 	}
-	serveCanvas(w, r, id, d.basePath, "view")
+	if d.collabEnabled {
+		serveCanvasWithCollab(w, r, id, d.basePath, "view")
+	} else {
+		serveCanvas(w, r, id, d.basePath, "view")
+	}
 }
 
 // ── API List ──────────────────────────────────────────────────────────────────
