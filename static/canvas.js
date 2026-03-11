@@ -148,6 +148,7 @@
     { id: "text",      icon: "T", title: "Text (T / 7)", num: "7" },
     { id: "eraser",    icon: "\u232B", title: "Eraser (X / 8)", num: "8" },
     { id: "image",     icon: '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3a1 1 0 011-1h12a1 1 0 011 1v10a1 1 0 01-1 1H2a1 1 0 01-1-1V3zm1 7.5V13h12v-1.5l-3-3-2 2-4-4-3 3zM11 6a1 1 0 100-2 1 1 0 000 2z"/></svg>', title: "Image (I / 9)", num: "9" },
+    { id: "library",   icon: '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.5A1.5 1.5 0 012.5 1h3A1.5 1.5 0 017 2.5v3A1.5 1.5 0 015.5 7h-3A1.5 1.5 0 011 5.5v-3zm8 0A1.5 1.5 0 0110.5 1h3A1.5 1.5 0 0115 2.5v3A1.5 1.5 0 0113.5 7h-3A1.5 1.5 0 019 5.5v-3zm-8 8A1.5 1.5 0 012.5 9h3A1.5 1.5 0 017 10.5v3A1.5 1.5 0 015.5 15h-3A1.5 1.5 0 011 13.5v-3zm8 0A1.5 1.5 0 0110.5 9h3a1.5 1.5 0 011.5 1.5v3a1.5 1.5 0 01-1.5 1.5h-3A1.5 1.5 0 019 13.5v-3z"/></svg>', title: "Browse Libraries", num: "" },
   ];
 
   let toolbar, canvas, ctx;
@@ -224,6 +225,7 @@
       toolbar.addEventListener("click", e => {
         const btn = e.target.closest(".tool-btn");
         if (!btn) return;
+        if (btn.dataset.tool === "library") { openLibraryBrowser(); return; }
         setTool(btn.dataset.tool);
       });
 
@@ -699,12 +701,23 @@
       .godraw-modal .modal-btn-primary:hover { background:#333; }
       .godraw-modal .modal-btn-secondary { background:#f0f0f0; color:#333; }
 
-      /* Library picker */
+      /* Library picker (file import) */
       .lib-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:8px; max-height:60vh; overflow-y:auto; padding:4px; }
       .lib-item { display:flex; flex-direction:column; align-items:center; padding:8px; border:1px solid #e0e0e0; border-radius:8px; cursor:pointer; transition:background .15s, border-color .15s; }
       .lib-item:hover { background:#f0f0ff; border-color:#6366f1; }
       .lib-preview { width:100px; height:80px; border-radius:4px; background:#fafafa; }
       .lib-name { font-size:.72rem; color:#555; margin-top:4px; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px; }
+
+      /* Library browser (catalog) */
+      .lib-browser-grid { overflow-y:auto; flex:1; max-height:55vh; display:flex; flex-direction:column; gap:6px; }
+      .lib-browser-card { display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid #e8e8e8; border-radius:10px; transition:border-color .15s, background .15s; }
+      .lib-browser-card:hover { border-color:#6366f1; background:#f8f8ff; }
+      .lib-browser-img { width:80px; height:56px; border-radius:6px; object-fit:cover; background:#f4f4f5; flex-shrink:0; }
+      .lib-browser-info { flex:1; min-width:0; }
+      .lib-browser-name { font-size:.88rem; font-weight:600; color:#1e1e2e; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .lib-browser-desc { font-size:.75rem; color:#666; margin-top:2px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+      .lib-browser-meta { font-size:.68rem; color:#999; margin-top:3px; }
+      .lib-browser-add { flex-shrink:0; padding:5px 14px; font-size:.8rem; }
 
       /* Dark mode */
       .godraw-dark #topbar { background:#1e1e2e; border-bottom-color:#333; }
@@ -740,6 +753,12 @@
       .godraw-dark .lib-item:hover { background:#2a2a3e; border-color:#6366f1; }
       .godraw-dark .lib-preview { background:#2a2a3e; }
       .godraw-dark .lib-name { color:#999; }
+      .godraw-dark .lib-browser-card { border-color:#333; }
+      .godraw-dark .lib-browser-card:hover { border-color:#6366f1; background:#2a2a3e; }
+      .godraw-dark .lib-browser-img { background:#2a2a3e; }
+      .godraw-dark .lib-browser-name { color:#e0e0e0; }
+      .godraw-dark .lib-browser-desc { color:#888; }
+      .godraw-dark #lib-search { background:#2a2a3e; color:#e0e0e0; border-color:#444; }
 
       /* Responsive: collapse sidebar */
       @media (max-width:580px) {
@@ -3457,6 +3476,125 @@
 
       grid.appendChild(card);
     }
+  }
+
+  // ── Excalidraw Library Browser ───────────────────────────────────────────
+  const LIB_CATALOG_URL = "https://libraries.excalidraw.com/libraries.json";
+  const LIB_BASE_URL = "https://libraries.excalidraw.com/libraries/";
+  const LIB_PREVIEW_URL = "https://libraries.excalidraw.com/previews/";
+  let libCatalogCache = null;
+
+  async function openLibraryBrowser() {
+    const { overlay, modal } = openModal(`
+      <h3 style="margin:0 0 8px;display:flex;align-items:center;gap:8px;">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.5A1.5 1.5 0 012.5 1h3A1.5 1.5 0 017 2.5v3A1.5 1.5 0 015.5 7h-3A1.5 1.5 0 011 5.5v-3zm8 0A1.5 1.5 0 0110.5 1h3A1.5 1.5 0 0115 2.5v3A1.5 1.5 0 0113.5 7h-3A1.5 1.5 0 019 5.5v-3zm-8 8A1.5 1.5 0 012.5 9h3A1.5 1.5 0 017 10.5v3A1.5 1.5 0 015.5 15h-3A1.5 1.5 0 011 13.5v-3zm8 0A1.5 1.5 0 0110.5 9h3a1.5 1.5 0 011.5 1.5v3a1.5 1.5 0 01-1.5 1.5h-3A1.5 1.5 0 019 13.5v-3z"/></svg>
+        Browse Libraries
+      </h3>
+      <p style="margin:0 0 8px;font-size:.78rem;color:#888;">Powered by <a href="https://libraries.excalidraw.com" target="_blank" style="color:#6366f1;">Excalidraw Libraries</a></p>
+      <input type="text" id="lib-search" placeholder="Search libraries\u2026" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:.85rem;box-sizing:border-box;margin-bottom:10px;outline:none;" />
+      <div id="lib-browser-grid" class="lib-browser-grid" style="min-height:200px;">
+        <div style="text-align:center;padding:40px;color:#888;">Loading libraries\u2026</div>
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-secondary" id="lib-browser-close">Close</button>
+      </div>
+    `);
+    modal.style.minWidth = "560px";
+    modal.style.maxWidth = "90vw";
+    modal.style.maxHeight = "85vh";
+    modal.style.display = "flex";
+    modal.style.flexDirection = "column";
+
+    modal.querySelector("#lib-browser-close").addEventListener("click", () => closeModal(overlay));
+
+    const grid = modal.querySelector("#lib-browser-grid");
+    const searchInput = modal.querySelector("#lib-search");
+    searchInput.focus();
+
+    // Fetch catalog
+    let catalog;
+    try {
+      if (libCatalogCache) {
+        catalog = libCatalogCache;
+      } else {
+        const res = await fetch(LIB_CATALOG_URL);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        catalog = await res.json();
+        libCatalogCache = catalog;
+      }
+    } catch (err) {
+      grid.innerHTML = '<div style="text-align:center;padding:40px;color:#e03131;">Failed to load library catalog. Check your connection.</div>';
+      return;
+    }
+
+    function renderCatalog(filter) {
+      grid.innerHTML = "";
+      const q = (filter || "").toLowerCase().trim();
+      const libs = catalog.filter(lib => {
+        if (!q) return true;
+        return (lib.name || "").toLowerCase().includes(q)
+          || (lib.description || "").toLowerCase().includes(q)
+          || (lib.itemNames || []).some(n => n.toLowerCase().includes(q));
+      });
+
+      if (!libs.length) {
+        grid.innerHTML = '<div style="text-align:center;padding:30px;color:#888;">No libraries match your search.</div>';
+        return;
+      }
+
+      for (const lib of libs) {
+        const card = document.createElement("div");
+        card.className = "lib-browser-card";
+
+        // Preview image
+        const img = document.createElement("img");
+        img.className = "lib-browser-img";
+        img.loading = "lazy";
+        img.src = LIB_PREVIEW_URL + lib.preview;
+        img.alt = lib.name;
+        img.onerror = () => { img.style.display = "none"; };
+        card.appendChild(img);
+
+        // Info
+        const info = document.createElement("div");
+        info.className = "lib-browser-info";
+        info.innerHTML = `<div class="lib-browser-name">${escHtml(lib.name)}</div>
+          <div class="lib-browser-desc">${escHtml(lib.description || "")}</div>
+          <div class="lib-browser-meta">${escHtml((lib.authors || []).map(a => a.name).join(", "))} \u00B7 v${lib.version || 1}</div>`;
+        card.appendChild(info);
+
+        // Add button
+        const addBtn = document.createElement("button");
+        addBtn.className = "modal-btn modal-btn-primary lib-browser-add";
+        addBtn.textContent = "+ Add";
+        addBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          addBtn.textContent = "\u2026";
+          addBtn.disabled = true;
+          try {
+            const res = await fetch(LIB_BASE_URL + lib.source);
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            const data = await res.json();
+            showLibraryPicker(data);
+            closeModal(overlay);
+          } catch (err) {
+            addBtn.textContent = "Error";
+            setTimeout(() => { addBtn.textContent = "+ Add"; addBtn.disabled = false; }, 2000);
+          }
+        });
+        card.appendChild(addBtn);
+
+        grid.appendChild(card);
+      }
+    }
+
+    renderCatalog("");
+
+    let searchTimer;
+    searchInput.addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => renderCatalog(searchInput.value), 200);
+    });
   }
 
   // ── #addLibrary URL hash integration ─────────────────────────────────────
