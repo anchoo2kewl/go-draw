@@ -46,6 +46,9 @@
   let isRotating = false;
   let rotateStartAngle = 0;
   let rotateOriginalAngle = 0;
+  let isResizing = false;
+  let resizeHandle = "";       // "nw","ne","sw","se" for shapes; "start","end" for lines
+  let resizeOriginal = null;   // snapshot of element before resize
   let textInput = null;
 
   // ── Clipboard (internal copy/paste) ──────────────────────────────────────
@@ -1228,6 +1231,7 @@
     const pad = 6;
     const angle = el.angle || 0;
     const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+    const isLine = el.type === "line" || el.type === "arrow";
 
     ctx.save();
     ctx.globalAlpha = 1;
@@ -1246,53 +1250,63 @@
     ctx.strokeRect(bb.x - pad, bb.y - pad, bb.w + pad * 2, bb.h + pad * 2);
     ctx.setLineDash([]);
 
-    // Corner handles
-    const corners = [
-      [bb.x - pad, bb.y - pad],
-      [bb.x + bb.w + pad, bb.y - pad],
-      [bb.x - pad, bb.y + bb.h + pad],
-      [bb.x + bb.w + pad, bb.y + bb.h + pad],
-    ];
-    corners.forEach(([hx, hy]) => {
+    function drawHandle(hx, hy) {
       ctx.beginPath();
       ctx.arc(hx, hy, 4 / vp.scale, 0, Math.PI * 2);
-      ctx.fillStyle = "#3b82f6";
+      ctx.fillStyle = "#fff";
       ctx.fill();
-      ctx.strokeStyle = "#fff";
+      ctx.strokeStyle = "#3b82f6";
       ctx.lineWidth = 1.5 / vp.scale;
       ctx.stroke();
-    });
+    }
 
-    // Rotation handle — stem line from top-center to handle
-    const handleDist = ROTATE_HANDLE_DIST / vp.scale;
-    const stemX = bb.x + bb.w / 2;
-    const stemTopY = bb.y - pad;
-    const handleY = stemTopY - handleDist;
+    if (isLine) {
+      // Endpoint handles for lines/arrows
+      ctx.restore(); // un-rotate for accurate world positions
+      ctx.save();
+      ctx.globalAlpha = 1;
+      const ep = getLineEndpoints(el);
+      drawHandle(ep.start.x, ep.start.y);
+      drawHandle(ep.end.x, ep.end.y);
+    } else {
+      // Corner resize handles for shapes
+      const corners = [
+        [bb.x - pad, bb.y - pad],
+        [bb.x + bb.w + pad, bb.y - pad],
+        [bb.x - pad, bb.y + bb.h + pad],
+        [bb.x + bb.w + pad, bb.y + bb.h + pad],
+      ];
+      corners.forEach(([hx, hy]) => drawHandle(hx, hy));
 
-    ctx.beginPath();
-    ctx.moveTo(stemX, stemTopY);
-    ctx.lineTo(stemX, handleY);
-    ctx.strokeStyle = "#3b82f6";
-    ctx.lineWidth = 1 / vp.scale;
-    ctx.stroke();
+      // Rotation handle — stem line from top-center to handle
+      const handleDist = ROTATE_HANDLE_DIST / vp.scale;
+      const stemX = bb.x + bb.w / 2;
+      const stemTopY = bb.y - pad;
+      const handleY = stemTopY - handleDist;
 
-    // Rotation handle circle
-    ctx.beginPath();
-    ctx.arc(stemX, handleY, 5 / vp.scale, 0, Math.PI * 2);
-    ctx.fillStyle = "#fff";
-    ctx.fill();
-    ctx.strokeStyle = "#3b82f6";
-    ctx.lineWidth = 1.5 / vp.scale;
-    ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(stemX, stemTopY);
+      ctx.lineTo(stemX, handleY);
+      ctx.strokeStyle = "#3b82f6";
+      ctx.lineWidth = 1 / vp.scale;
+      ctx.stroke();
 
-    // Rotation icon (↻) inside handle
-    ctx.fillStyle = "#3b82f6";
-    ctx.font = `${9 / vp.scale}px sans-serif`;
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "center";
-    ctx.fillText("\u21BB", stemX, handleY);
-    ctx.textAlign = "start";
-    ctx.textBaseline = "alphabetic";
+      ctx.beginPath();
+      ctx.arc(stemX, handleY, 5 / vp.scale, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff";
+      ctx.fill();
+      ctx.strokeStyle = "#3b82f6";
+      ctx.lineWidth = 1.5 / vp.scale;
+      ctx.stroke();
+
+      ctx.fillStyle = "#3b82f6";
+      ctx.font = `${9 / vp.scale}px sans-serif`;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
+      ctx.fillText("\u21BB", stemX, handleY);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
 
     ctx.restore();
   }
@@ -1307,6 +1321,47 @@
     const localY = bb.y - pad - handleDist;
     if (!angle) return { x: localX, y: localY };
     return rotatePoint(localX, localY, cx, cy, angle);
+  }
+
+  function getResizeHandles(el) {
+    const bb = getBBox(el);
+    const pad = 6;
+    const angle = el.angle || 0;
+    const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+    const raw = {
+      nw: { x: bb.x - pad, y: bb.y - pad },
+      ne: { x: bb.x + bb.w + pad, y: bb.y - pad },
+      sw: { x: bb.x - pad, y: bb.y + bb.h + pad },
+      se: { x: bb.x + bb.w + pad, y: bb.y + bb.h + pad },
+    };
+    if (angle) {
+      for (const k of Object.keys(raw)) raw[k] = rotatePoint(raw[k].x, raw[k].y, cx, cy, angle);
+    }
+    return raw;
+  }
+
+  function getLineEndpoints(el) {
+    if (el.pts && el.pts.length > 1) {
+      return { start: { x: el.pts[0].x, y: el.pts[0].y }, end: { x: el.pts[el.pts.length-1].x, y: el.pts[el.pts.length-1].y } };
+    }
+    return { start: { x: el.x, y: el.y }, end: { x: el.x2, y: el.y2 } };
+  }
+
+  const HANDLE_CURSORS = { nw: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", se: "nwse-resize", start: "crosshair", end: "crosshair" };
+
+  function hitTestHandles(el, wx, wy) {
+    const threshold = 8 / vp.scale;
+    if (el.type === "line" || el.type === "arrow") {
+      const ep = getLineEndpoints(el);
+      if (Math.hypot(wx - ep.start.x, wy - ep.start.y) < threshold) return "start";
+      if (Math.hypot(wx - ep.end.x, wy - ep.end.y) < threshold) return "end";
+      return null;
+    }
+    const handles = getResizeHandles(el);
+    for (const [k, pos] of Object.entries(handles)) {
+      if (Math.hypot(wx - pos.x, wy - pos.y) < threshold) return k;
+    }
+    return null;
   }
 
   function getBBox(el) {
@@ -1455,6 +1510,16 @@
             render();
             return;
           }
+          // Check resize handles
+          const rHandle = hitTestHandles(sel, wx, wy);
+          if (rHandle) {
+            isResizing = true;
+            resizeHandle = rHandle;
+            resizeOriginal = JSON.parse(JSON.stringify(sel));
+            snapshot();
+            canvas.style.cursor = HANDLE_CURSORS[rHandle] || "default";
+            return;
+          }
         }
       }
       // Hit test in reverse (topmost first)
@@ -1584,15 +1649,20 @@
       return;
     }
 
-    // Rotation handle cursor feedback
-    if (activeTool === "select" && selectedIds.size === 1 && !isDragging && !isRotating) {
+    // Resize / rotation handle cursor feedback
+    if (activeTool === "select" && selectedIds.size === 1 && !isDragging && !isRotating && !isResizing) {
       const sel = scene.elements.find(e => selectedIds.has(e.id));
       if (sel) {
         const rh = getRotationHandlePos(sel);
         if (Math.hypot(wx - rh.x, wy - rh.y) < 8 / vp.scale) {
           canvas.style.cursor = "grab";
         } else {
-          canvas.style.cursor = "default";
+          const rHandle = hitTestHandles(sel, wx, wy);
+          if (rHandle) {
+            canvas.style.cursor = HANDLE_CURSORS[rHandle] || "default";
+          } else {
+            canvas.style.cursor = hitTest(sel, wx, wy) ? "move" : "default";
+          }
         }
       }
     }
@@ -1609,6 +1679,51 @@
           newAngle = Math.round(newAngle / (Math.PI / 12)) * (Math.PI / 12);
         }
         sel.angle = newAngle;
+      }
+      render();
+      return;
+    }
+
+    // Resize dragging
+    if (isResizing && selectedIds.size === 1 && resizeOriginal) {
+      const sel = scene.elements.find(e => selectedIds.has(e.id));
+      if (sel) {
+        const o = resizeOriginal;
+        const angle = o.angle || 0;
+        // Un-rotate mouse into element's local frame
+        let lx = wx, ly = wy;
+        if (angle) {
+          const c = { x: o.x + (o.w || 0) / 2, y: o.y + (o.h || 0) / 2 };
+          const p = rotatePoint(wx, wy, c.x, c.y, -angle);
+          lx = p.x; ly = p.y;
+        }
+
+        if (sel.type === "line" || sel.type === "arrow") {
+          // Line/arrow endpoint dragging
+          if (resizeHandle === "start") {
+            if (sel.pts && sel.pts.length > 1) { sel.pts[0] = { x: wx, y: wy }; }
+            else { sel.x = wx; sel.y = wy; }
+          } else if (resizeHandle === "end") {
+            if (sel.pts && sel.pts.length > 1) { sel.pts[sel.pts.length - 1] = { x: wx, y: wy }; }
+            else { sel.x2 = wx; sel.y2 = wy; }
+          }
+        } else {
+          // Shape corner resize
+          const fixedX = (resizeHandle === "nw" || resizeHandle === "sw") ? o.x + o.w : o.x;
+          const fixedY = (resizeHandle === "nw" || resizeHandle === "ne") ? o.y + o.h : o.y;
+          let newX = Math.min(fixedX, lx), newY = Math.min(fixedY, ly);
+          let newW = Math.abs(lx - fixedX), newH = Math.abs(ly - fixedY);
+          // Shift = maintain aspect ratio
+          if (e.shiftKey && o.w && o.h) {
+            const aspect = Math.abs(o.w / o.h);
+            if (newW / newH > aspect) newW = newH * aspect;
+            else newH = newW / aspect;
+            if (resizeHandle === "nw") { newX = fixedX - newW; newY = fixedY - newH; }
+            else if (resizeHandle === "ne") { newY = fixedY - newH; }
+            else if (resizeHandle === "sw") { newX = fixedX - newW; }
+          }
+          sel.x = newX; sel.y = newY; sel.w = newW; sel.h = newH;
+        }
       }
       render();
       return;
@@ -1653,6 +1768,7 @@
     }
     if (eraserActive) { eraserActive = false; erasedIds = new Set(); return; }
     if (isRotating) { isRotating = false; canvas.style.cursor = "default"; return; }
+    if (isResizing) { isResizing = false; resizeHandle = ""; resizeOriginal = null; canvas.style.cursor = "default"; return; }
     if (isDragging) { isDragging = false; snapshot(); return; }
     if (marquee) {
       // Select all elements intersecting the marquee rectangle
