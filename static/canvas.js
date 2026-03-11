@@ -26,7 +26,8 @@
   let fillColor = "transparent";
   let strokeWidth = 2;
   let fontSize = 16;
-  let fontFamily = "sans-serif"; // "sans-serif" | "serif" | "mono" | "hand"
+  let fontFamily = "hand";       // "hand" | "sans-serif" | "mono" | "serif"
+  let textAlign = "center";     // "left" | "center" | "right"
   let strokeStyle = "solid";   // "solid" | "dashed" | "dotted"
   let roughness = 0;           // 0=architect, 1=artist, 2=cartoonist
   let roundness = "sharp";     // "sharp" | "round"
@@ -379,21 +380,33 @@
         </div>
       </div>
       <div class="sb-section" id="font-section" style="display:none">
-        <div class="sb-label">Font</div>
-        <div class="sb-row">
-          <select id="font-family" style="flex:1;margin-right:6px">
-            <option value="sans-serif" selected>Sans-serif</option>
-            <option value="serif">Serif</option>
-            <option value="mono">Monospace</option>
-            <option value="hand">Handwriting</option>
-          </select>
-          <select id="font-size">
-            <option value="12">12</option>
-            <option value="16" selected>16</option>
-            <option value="20">20</option>
-            <option value="28">28</option>
-            <option value="36">36</option>
-          </select>
+        <div class="sb-label">Font family</div>
+        <div class="sb-row" id="ff-btns">
+          <button class="sb-btn" data-prop="fontFamily" data-val="hand" title="Handwriting">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 12.5l2-8h1l2.5 6L10 4h1l3 8.5M1 14h14" stroke="currentColor" stroke-width="0.5" fill="none"/></svg>
+          </button>
+          <button class="sb-btn" data-prop="fontFamily" data-val="sans-serif" title="Normal">A</button>
+          <button class="sb-btn" data-prop="fontFamily" data-val="mono" title="Code">&lt;/&gt;</button>
+          <button class="sb-btn" data-prop="fontFamily" data-val="serif" title="Serif"><span style="font-family:Georgia,serif;font-weight:bold">A</span></button>
+        </div>
+        <div class="sb-label">Font size</div>
+        <div class="sb-row" id="fs-btns">
+          <button class="sb-btn" data-prop="fontSize" data-val="16" title="Small (16px)">S</button>
+          <button class="sb-btn" data-prop="fontSize" data-val="20" title="Medium (20px)">M</button>
+          <button class="sb-btn" data-prop="fontSize" data-val="28" title="Large (28px)">L</button>
+          <button class="sb-btn" data-prop="fontSize" data-val="36" title="Extra Large (36px)">XL</button>
+        </div>
+        <div class="sb-label">Text align</div>
+        <div class="sb-row" id="ta-btns">
+          <button class="sb-btn" data-prop="textAlign" data-val="left" title="Left">
+            <svg width="16" height="16" viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="3" x2="14" y2="3"/><line x1="2" y1="6.5" x2="10" y2="6.5"/><line x1="2" y1="10" x2="14" y2="10"/><line x1="2" y1="13.5" x2="10" y2="13.5"/></svg>
+          </button>
+          <button class="sb-btn" data-prop="textAlign" data-val="center" title="Center">
+            <svg width="16" height="16" viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="3" x2="14" y2="3"/><line x1="4" y1="6.5" x2="12" y2="6.5"/><line x1="2" y1="10" x2="14" y2="10"/><line x1="4" y1="13.5" x2="12" y2="13.5"/></svg>
+          </button>
+          <button class="sb-btn" data-prop="textAlign" data-val="right" title="Right">
+            <svg width="16" height="16" viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="3" x2="14" y2="3"/><line x1="6" y1="6.5" x2="14" y2="6.5"/><line x1="2" y1="10" x2="14" y2="10"/><line x1="6" y1="13.5" x2="14" y2="13.5"/></svg>
+          </button>
         </div>
       </div>
       <div class="sb-section" id="angle-section" style="display:none">
@@ -465,9 +478,18 @@
       });
     });
 
-    // Font family + size
-    sb.querySelector("#font-family").addEventListener("change", e => setProp("fontFamily", e.target.value));
-    sb.querySelector("#font-size").addEventListener("change", e => setProp("fontSize", parseInt(e.target.value)));
+    // Font family buttons
+    sb.querySelectorAll("#ff-btns .sb-btn").forEach(btn => {
+      btn.addEventListener("click", () => setProp("fontFamily", btn.dataset.val));
+    });
+    // Font size buttons
+    sb.querySelectorAll("#fs-btns .sb-btn").forEach(btn => {
+      btn.addEventListener("click", () => setProp("fontSize", parseInt(btn.dataset.val)));
+    });
+    // Text align buttons
+    sb.querySelectorAll("#ta-btns .sb-btn").forEach(btn => {
+      btn.addEventListener("click", () => setProp("textAlign", btn.dataset.val));
+    });
 
     // Angle slider
     sb.querySelector("#angle-slider").addEventListener("input", e => {
@@ -933,13 +955,19 @@
     ctx.font = `${fs}px ${fontCSS(el.fontFamily)}`;
     ctx.fillStyle = el.strokeColor || "#1e1e2e";
     ctx.textBaseline = "middle";
-    ctx.textAlign = "center";
+    const align = el.textAlign || "center";
+    ctx.textAlign = align;
     ctx.setLineDash([]);
     const lines = el.text.split("\n");
     const lineHeight = fs * 1.3;
     const totalH = lines.length * lineHeight;
     const startY = bb.y + bb.h / 2 - totalH / 2 + lineHeight / 2;
-    lines.forEach((line, i) => ctx.fillText(line, bb.x + bb.w / 2, startY + i * lineHeight));
+    lines.forEach((line, i) => {
+      let tx = bb.x + bb.w / 2;
+      if (align === "left") tx = bb.x + 8;
+      else if (align === "right") tx = bb.x + bb.w - 8;
+      ctx.fillText(line, tx, startY + i * lineHeight);
+    });
     ctx.textAlign = "start";
     ctx.textBaseline = "alphabetic";
   }
@@ -1154,11 +1182,21 @@
   }
 
   function drawText(ctx, el) {
-    ctx.font = `${el.fontSize || 16}px ${fontCSS(el.fontFamily)}`;
+    const fs = el.fontSize || 16;
+    ctx.font = `${fs}px ${fontCSS(el.fontFamily)}`;
     ctx.fillStyle = el.strokeColor || "#1e1e2e";
     ctx.textBaseline = "top";
+    const align = el.textAlign || "left";
+    ctx.textAlign = align;
     const lines = (el.text || "").split("\n");
-    lines.forEach((line, i) => ctx.fillText(line, el.x, el.y + i * (el.fontSize || 16) * 1.3));
+    const w = el.w || 0;
+    lines.forEach((line, i) => {
+      let tx = el.x;
+      if (align === "center") tx = el.x + w / 2;
+      else if (align === "right") tx = el.x + w;
+      ctx.fillText(line, tx, el.y + i * fs * 1.3);
+    });
+    ctx.textAlign = "start";
   }
 
   function drawImage(ctx, el) {
@@ -1819,6 +1857,7 @@
       case "opacity": opacity = value; break;
       case "fontSize": fontSize = value; break;
       case "fontFamily": fontFamily = value; break;
+      case "textAlign": textAlign = value; break;
     }
     // Apply to selected elements
     if (selectedIds.size) {
@@ -1889,13 +1928,21 @@
     sb.querySelector("#opacity-slider").value = op;
     sb.querySelector("#opacity-val").textContent = op;
 
-    // Font size section — visible only for text tool or text element
+    // Font section — visible for text tool, text elements, or any shape (for label text)
     const fontSec = document.getElementById("font-section");
-    const showFont = activeTool === "text" || (sel && (sel.type === "text" || sel.text));
+    const showFont = activeTool === "text" || (sel && (sel.type === "text" || sel.type === "rect" || sel.type === "diamond" || sel.type === "ellipse" || sel.text));
     fontSec.style.display = showFont ? "" : "none";
     if (showFont) {
-      sb.querySelector("#font-size").value = String(fs);
-      sb.querySelector("#font-family").value = ff;
+      const ta = sel ? (sel.textAlign || "center") : textAlign;
+      sb.querySelectorAll("#ff-btns .sb-btn").forEach(b => {
+        b.classList.toggle("active", b.dataset.val === ff);
+      });
+      sb.querySelectorAll("#fs-btns .sb-btn").forEach(b => {
+        b.classList.toggle("active", parseInt(b.dataset.val) === fs);
+      });
+      sb.querySelectorAll("#ta-btns .sb-btn").forEach(b => {
+        b.classList.toggle("active", b.dataset.val === ta);
+      });
     }
 
     // Angle section — visible when an element is selected
@@ -2363,6 +2410,7 @@
         snapshot();
         shape.text = text;
         shape.fontSize = fs;
+        shape.fontFamily = shape.fontFamily || fontFamily;
         delete shape._savedText;
       }
       render();
@@ -2383,7 +2431,7 @@
       id: existingId || uid(), type: "text",
       x: wx, y: wy,
       w: maxW, h: lines.length * fs * 1.3,
-      text, fontSize: fs, fontFamily: ff,
+      text, fontSize: fs, fontFamily: ff, textAlign,
       strokeColor: existingId ? (ti.dataset.textStrokeColor || strokeColor) : strokeColor,
       opacity: existingId ? parseFloat(ti.dataset.textOpacity) : opacity,
     });
@@ -2985,6 +3033,7 @@
           text: exEl.text || exEl.originalText || "",
           fontSize: exEl.fontSize || 16,
           fontFamily: EX_FONT_TO_GODRAW[exEl.fontFamily] || "sans-serif",
+          textAlign: exEl.textAlign || "left",
         };
       case "line":
       case "arrow": {
@@ -3097,7 +3146,7 @@
           text: el.text || "", originalText: el.text || "",
           fontSize: el.fontSize || 16,
           fontFamily: GODRAW_FONT_TO_EX[el.fontFamily] || 2,
-          textAlign: "left",
+          textAlign: el.textAlign || "left",
           verticalAlign: "top",
           baseline: (el.fontSize || 16),
           lineHeight: 1.25,
