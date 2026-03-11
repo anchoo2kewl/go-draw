@@ -46,6 +46,14 @@ func (d *Draw) routes() http.Handler {
 		path := strings.TrimPrefix(r.URL.Path, base)
 		path = strings.TrimPrefix(path, "/")
 
+		// Favicon: serve from embedded static FS.
+		if path == "favicon.ico" || path == "favicon.svg" {
+			w.Header().Del("Content-Type")
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+			http.ServeFileFS(w, r, staticSub, "favicon.svg")
+			return
+		}
+
 		// Static assets: serve directly from embedded FS.
 		// Sets Cache-Control and explicit Content-Type so that parent router
 		// middleware (e.g. SetHeader("Content-Type","application/json")) is
@@ -161,6 +169,7 @@ var listTmpl = template.Must(template.New("list").Parse(`<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Drawings</title>
+<link rel="icon" type="image/svg+xml" href="{{.BasePath}}/static/favicon.svg">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f8f8f8;color:#1e1e2e;padding:2rem}

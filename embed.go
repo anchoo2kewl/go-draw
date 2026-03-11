@@ -32,6 +32,7 @@ var canvasTmpl = template.Must(template.New("canvas").Parse(`<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{if eq .Mode "edit"}}Edit Drawing{{else}}View Drawing{{end}}</title>
+<link rel="icon" type="image/svg+xml" href="{{.BasePath}}/static/favicon.svg">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:100%;height:100%;overflow:hidden;background:#f4f4f5}
