@@ -137,6 +137,7 @@
     { id: "select",    icon: '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2.5 1L12 8l-4.5 1L5.5 14z"/></svg>', title: "Select (V / 1)", num: "1" },
     { id: "rect",      icon: "\u25AD", title: "Rectangle (R / 2)", num: "2" },
     { id: "ellipse",   icon: "\u25EF", title: "Ellipse (E / 3)", num: "3" },
+    { id: "diamond",   icon: "\u25C7", title: "Diamond (D)", num: "" },
     { id: "line",      icon: "\u2571", title: "Line (L / 4)", num: "4" },
     { id: "arrow",     icon: "\u2192", title: "Arrow (A / 5)", num: "5" },
     { id: "pencil",    icon: "\u270F", title: "Pencil (P / 6)", num: "6" },
@@ -184,6 +185,10 @@
       moreMenu.innerHTML = `
         <button id="btn-export-png">\uD83D\uDDBC Export PNG</button>
         <button id="btn-export-svg">\uD83D\uDCC4 Export SVG</button>
+        <button id="btn-export-excalidraw">\uD83D\uDCC2 Export .excalidraw</button>
+        <hr style="margin:4px 0;border:none;border-top:1px solid #e0e0e0;">
+        <button id="btn-import-excalidraw">\uD83D\uDCE5 Import .excalidraw</button>
+        <button id="btn-import-library">\uD83D\uDCDA Import Library</button>
         <hr style="margin:4px 0;border:none;border-top:1px solid #e0e0e0;">
         <button id="btn-mermaid-import">Mermaid \u2192 Draw</button>
         <button id="btn-mermaid-export">Draw \u2192 Mermaid</button>
@@ -200,6 +205,9 @@
       document.addEventListener("click", () => moreMenu.classList.remove("open"));
       moreMenu.querySelector("#btn-export-png").addEventListener("click", () => { moreMenu.classList.remove("open"); exportPNG(); });
       moreMenu.querySelector("#btn-export-svg").addEventListener("click", () => { moreMenu.classList.remove("open"); exportSVG(); });
+      moreMenu.querySelector("#btn-export-excalidraw").addEventListener("click", () => { moreMenu.classList.remove("open"); exportExcalidraw(); });
+      moreMenu.querySelector("#btn-import-excalidraw").addEventListener("click", () => { moreMenu.classList.remove("open"); importExcalidrawFile(); });
+      moreMenu.querySelector("#btn-import-library").addEventListener("click", () => { moreMenu.classList.remove("open"); importExcalidrawLibrary(); });
       moreMenu.querySelector("#btn-mermaid-import").addEventListener("click", () => { moreMenu.classList.remove("open"); openMermaidImport(); });
       moreMenu.querySelector("#btn-mermaid-export").addEventListener("click", () => { moreMenu.classList.remove("open"); openMermaidExport(); });
 
@@ -666,6 +674,13 @@
       .godraw-modal .modal-btn-primary:hover { background:#333; }
       .godraw-modal .modal-btn-secondary { background:#f0f0f0; color:#333; }
 
+      /* Library picker */
+      .lib-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:8px; max-height:60vh; overflow-y:auto; padding:4px; }
+      .lib-item { display:flex; flex-direction:column; align-items:center; padding:8px; border:1px solid #e0e0e0; border-radius:8px; cursor:pointer; transition:background .15s, border-color .15s; }
+      .lib-item:hover { background:#f0f0ff; border-color:#6366f1; }
+      .lib-preview { width:100px; height:80px; border-radius:4px; background:#fafafa; }
+      .lib-name { font-size:.72rem; color:#555; margin-top:4px; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100px; }
+
       /* Dark mode */
       .godraw-dark #topbar { background:#1e1e2e; border-bottom-color:#333; }
       .godraw-dark #title-input { background:#2a2a3e; color:#e0e0e0; border-color:#444; }
@@ -696,6 +711,10 @@
       .godraw-dark #sidebar select { background:#2a2a3e; color:#e0e0e0; border-color:#444; }
       .godraw-dark #sidebar input[type=range] { accent-color:#6366f1; }
       .godraw-dark #save-status { color:#666; }
+      .godraw-dark .lib-item { border-color:#444; }
+      .godraw-dark .lib-item:hover { background:#2a2a3e; border-color:#6366f1; }
+      .godraw-dark .lib-preview { background:#2a2a3e; }
+      .godraw-dark .lib-name { color:#999; }
 
       /* Responsive: collapse sidebar */
       @media (max-width:580px) {
@@ -893,6 +912,7 @@
     }
     switch (el.type) {
       case "rect":     drawRect(ctx, el); break;
+      case "diamond":  drawDiamond(ctx, el); break;
       case "ellipse":  drawEllipse(ctx, el); break;
       case "line":     drawLine(ctx, el); break;
       case "arrow":    drawArrow(ctx, el); break;
@@ -960,6 +980,45 @@
     }
   }
 
+  function drawDiamond(ctx, el) {
+    const { x, y, w, h } = el;
+    const r = el.roughness ?? 0;
+    const cx = x + w / 2, cy = y + h / 2;
+
+    // Fill (always clean path)
+    if (el.fillColor && el.fillColor !== "transparent") {
+      ctx.beginPath();
+      ctx.moveTo(cx, y);
+      ctx.lineTo(x + w, cy);
+      ctx.lineTo(cx, y + h);
+      ctx.lineTo(x, cy);
+      ctx.closePath();
+      ctx.fillStyle = el.fillColor;
+      ctx.fill();
+    }
+
+    if (r === 0) {
+      ctx.beginPath();
+      ctx.moveTo(cx, y);
+      ctx.lineTo(x + w, cy);
+      ctx.lineTo(cx, y + h);
+      ctx.lineTo(x, cy);
+      ctx.closePath();
+      ctx.stroke();
+    } else {
+      const seed = hashCode(el.id);
+      for (let pass = 0; pass < 2; pass++) {
+        const rng = seededRandom(seed + pass * 1000);
+        ctx.beginPath();
+        roughLine(ctx, cx, y, x + w, cy, r, rng);
+        roughLine(ctx, x + w, cy, cx, y + h, r, rng);
+        roughLine(ctx, cx, y + h, x, cy, r, rng);
+        roughLine(ctx, x, cy, cx, y, r, rng);
+        ctx.stroke();
+      }
+    }
+  }
+
   function drawEllipse(ctx, el) {
     const cx = el.x + el.w / 2, cy = el.y + el.h / 2;
     const rx = Math.abs(el.w / 2), ry = Math.abs(el.h / 2);
@@ -990,6 +1049,23 @@
 
   function drawLine(ctx, el) {
     const r = el.roughness ?? 0;
+    if (el.pts && el.pts.length > 1) {
+      if (r === 0) {
+        ctx.beginPath();
+        ctx.moveTo(el.pts[0].x, el.pts[0].y);
+        for (let i = 1; i < el.pts.length; i++) ctx.lineTo(el.pts[i].x, el.pts[i].y);
+        ctx.stroke();
+      } else {
+        const seed = hashCode(el.id);
+        for (let pass = 0; pass < 2; pass++) {
+          const rng = seededRandom(seed + pass * 1000);
+          ctx.beginPath();
+          for (let i = 1; i < el.pts.length; i++) roughLine(ctx, el.pts[i-1].x, el.pts[i-1].y, el.pts[i].x, el.pts[i].y, r, rng);
+          ctx.stroke();
+        }
+      }
+      return;
+    }
     if (r === 0) {
       ctx.beginPath();
       ctx.moveTo(el.x, el.y);
@@ -1007,35 +1083,60 @@
   }
 
   function drawArrow(ctx, el) {
-    const dx = el.x2 - el.x, dy = el.y2 - el.y;
-    const len = Math.hypot(dx, dy);
-    if (len < 1) return;
     const r = el.roughness ?? 0;
+    let endX, endY, prevX, prevY;
 
-    // Line body
-    if (r === 0) {
-      ctx.beginPath();
-      ctx.moveTo(el.x, el.y);
-      ctx.lineTo(el.x2, el.y2);
-      ctx.stroke();
-    } else {
-      const seed = hashCode(el.id);
-      for (let pass = 0; pass < 2; pass++) {
-        const rng = seededRandom(seed + pass * 1000);
+    if (el.pts && el.pts.length > 1) {
+      // Multi-point arrow
+      if (r === 0) {
         ctx.beginPath();
-        roughLine(ctx, el.x, el.y, el.x2, el.y2, r, rng);
+        ctx.moveTo(el.pts[0].x, el.pts[0].y);
+        for (let i = 1; i < el.pts.length; i++) ctx.lineTo(el.pts[i].x, el.pts[i].y);
         ctx.stroke();
+      } else {
+        const seed = hashCode(el.id);
+        for (let pass = 0; pass < 2; pass++) {
+          const rng = seededRandom(seed + pass * 1000);
+          ctx.beginPath();
+          for (let i = 1; i < el.pts.length; i++) roughLine(ctx, el.pts[i-1].x, el.pts[i-1].y, el.pts[i].x, el.pts[i].y, r, rng);
+          ctx.stroke();
+        }
       }
+      endX = el.pts[el.pts.length-1].x; endY = el.pts[el.pts.length-1].y;
+      prevX = el.pts[el.pts.length-2].x; prevY = el.pts[el.pts.length-2].y;
+    } else {
+      const dx = el.x2 - el.x, dy = el.y2 - el.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 1) return;
+      if (r === 0) {
+        ctx.beginPath();
+        ctx.moveTo(el.x, el.y);
+        ctx.lineTo(el.x2, el.y2);
+        ctx.stroke();
+      } else {
+        const seed = hashCode(el.id);
+        for (let pass = 0; pass < 2; pass++) {
+          const rng = seededRandom(seed + pass * 1000);
+          ctx.beginPath();
+          roughLine(ctx, el.x, el.y, el.x2, el.y2, r, rng);
+          ctx.stroke();
+        }
+      }
+      endX = el.x2; endY = el.y2;
+      prevX = el.x; prevY = el.y;
     }
 
     // Arrowhead (always clean)
-    const ux = dx / len, uy = dy / len;
+    const adx = endX - prevX, ady = endY - prevY;
+    const alen = Math.hypot(adx, ady);
+    if (alen < 1) return;
+    const ux = adx / alen, uy = ady / alen;
     const hw = 10, hl = 18;
     ctx.setLineDash([]); // arrowhead always solid
     ctx.beginPath();
-    ctx.moveTo(el.x2, el.y2);
-    ctx.lineTo(el.x2 - hl * ux + hw * uy, el.y2 - hl * uy - hw * ux);
-    ctx.lineTo(el.x2 - hl * ux - hw * uy, el.y2 - hl * uy + hw * ux);
+    ctx.moveTo(endX, endY);
+    ctx.lineTo(endX - hl * ux + hw * uy, endY - hl * uy - hw * ux);
+    ctx.lineTo(endX - hl * ux - hw * uy, endY - hl * uy + hw * ux);
     ctx.closePath();
     ctx.fillStyle = el.strokeColor || "#1e1e2e";
     ctx.fill();
@@ -1173,12 +1274,18 @@
   function getBBox(el) {
     switch (el.type) {
       case "rect":
+      case "diamond":
       case "ellipse":
       case "text":
       case "image":
         return { x: el.x, y: el.y, w: el.w || 0, h: el.h || 0 };
       case "line":
       case "arrow": {
+        if (el.pts && el.pts.length > 1) {
+          const xs = el.pts.map(p => p.x), ys = el.pts.map(p => p.y);
+          const mx = Math.min(...xs), my = Math.min(...ys);
+          return { x: mx, y: my, w: Math.max(...xs) - mx, h: Math.max(...ys) - my };
+        }
         const x = Math.min(el.x, el.x2), y = Math.min(el.y, el.y2);
         return { x, y, w: Math.abs(el.x2 - el.x), h: Math.abs(el.y2 - el.y) };
       }
@@ -1217,6 +1324,7 @@
     const pad = 8;
     switch (el.type) {
       case "rect":
+      case "diamond":
       case "ellipse":
       case "text":
       case "image": {
@@ -1225,8 +1333,15 @@
         return wx >= x0 - pad && wx <= x1 + pad && wy >= y0 - pad && wy <= y1 + pad;
       }
       case "line":
-      case "arrow":
+      case "arrow": {
+        if (el.pts && el.pts.length > 1) {
+          for (let i = 1; i < el.pts.length; i++) {
+            if (distToSegment(wx, wy, el.pts[i-1].x, el.pts[i-1].y, el.pts[i].x, el.pts[i].y) < pad + el.strokeWidth) return true;
+          }
+          return false;
+        }
         return distToSegment(wx, wy, el.x, el.y, el.x2, el.y2) < pad + el.strokeWidth;
+      }
       case "pencil": {
         if (!el.pts) return false;
         for (let i = 1; i < el.pts.length; i++) {
@@ -1385,7 +1500,7 @@
       const hit = [...scene.elements].reverse().find(el => hitTest(el, wx, wy));
       if (hit && hit.type === "text") {
         startTextInputOnElement(hit);
-      } else if (hit && (hit.type === "rect" || hit.type === "ellipse")) {
+      } else if (hit && (hit.type === "rect" || hit.type === "diamond" || hit.type === "ellipse")) {
         startTextInputOnShape(hit);
       } else {
         startTextInput(wx, wy);
@@ -1555,6 +1670,7 @@
     if (e.key === "h" || e.key === "H") setTool("hand");
     if (e.key === "v" || e.key === "V" || e.key === "1") setTool("select");
     if (e.key === "r" || e.key === "R" || e.key === "2") setTool("rect");
+    if (e.key === "d" || e.key === "D") setTool("diamond");
     if (e.key === "e" || e.key === "E" || e.key === "3") setTool("ellipse");
     if (e.key === "l" || e.key === "L" || e.key === "4") setTool("line");
     if (e.key === "a" || e.key === "A" || e.key === "5") setTool("arrow");
@@ -1592,7 +1708,7 @@
       selectedIds = new Set([hit.id]);
       commitTextInput();
       startTextInputOnElement(hit);
-    } else if (hit && (hit.type === "rect" || hit.type === "ellipse")) {
+    } else if (hit && (hit.type === "rect" || hit.type === "diamond" || hit.type === "ellipse")) {
       // Double-click on shape → edit label text inside
       selectedIds = new Set([hit.id]);
       commitTextInput();
@@ -1828,9 +1944,11 @@
       if (!selectedIds.has(el.id)) continue;
       const clone = JSON.parse(JSON.stringify(el));
       clone.id = uid();
-      if (clone.x !== undefined) { clone.x += 10; clone.y += 10; }
-      if (clone.x2 !== undefined) { clone.x2 += 10; clone.y2 += 10; }
       if (clone.pts) { clone.pts = clone.pts.map(p => ({ x: p.x + 10, y: p.y + 10 })); }
+      else {
+        if (clone.x !== undefined) { clone.x += 10; clone.y += 10; }
+        if (clone.x2 !== undefined) { clone.x2 += 10; clone.y2 += 10; }
+      }
       scene.elements.push(clone);
       newIds.add(clone.id);
     }
@@ -1960,6 +2078,14 @@
           }
           break;
         }
+        case "diamond": {
+          const dcx = el.x + el.w/2, dcy = el.y + el.h/2;
+          svg += `  <polygon points="${dcx},${el.y} ${el.x+el.w},${dcy} ${dcx},${el.y+el.h} ${el.x},${dcy}" fill="${fc}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
+          if (el.text) {
+            svg += `  <text x="${dcx}" y="${dcy}" text-anchor="middle" dominant-baseline="central" font-size="${el.fontSize||16}" font-family="${fontCSS(el.fontFamily)}" fill="${sc}" opacity="${op}"${rot}>${escHtml(el.text)}</text>\n`;
+          }
+          break;
+        }
         case "ellipse": {
           const cx = el.x + el.w/2, cy = el.y + el.h/2;
           svg += `  <ellipse cx="${cx}" cy="${cy}" rx="${Math.abs(el.w/2)}" ry="${Math.abs(el.h/2)}" fill="${fc}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
@@ -1969,19 +2095,34 @@
           break;
         }
         case "line":
-          svg += `  <line x1="${el.x}" y1="${el.y}" x2="${el.x2}" y2="${el.y2}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
+          if (el.pts && el.pts.length > 1) {
+            let d = `M${el.pts[0].x},${el.pts[0].y}`;
+            for (let i = 1; i < el.pts.length; i++) d += ` L${el.pts[i].x},${el.pts[i].y}`;
+            svg += `  <polyline points="${el.pts.map(p=>p.x+","+p.y).join(" ")}" fill="none" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
+          } else {
+            svg += `  <line x1="${el.x}" y1="${el.y}" x2="${el.x2}" y2="${el.y2}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
+          }
           break;
         case "arrow": {
-          const dx = el.x2 - el.x, dy = el.y2 - el.y;
+          let endX, endY, prevX, prevY;
+          if (el.pts && el.pts.length > 1) {
+            let d = el.pts.map(p=>p.x+","+p.y).join(" ");
+            svg += `  <polyline points="${d}" fill="none" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
+            endX = el.pts[el.pts.length-1].x; endY = el.pts[el.pts.length-1].y;
+            prevX = el.pts[el.pts.length-2].x; prevY = el.pts[el.pts.length-2].y;
+          } else {
+            svg += `  <line x1="${el.x}" y1="${el.y}" x2="${el.x2}" y2="${el.y2}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
+            endX = el.x2; endY = el.y2; prevX = el.x; prevY = el.y;
+          }
+          const dx = endX - prevX, dy = endY - prevY;
           const len = Math.hypot(dx, dy);
           const ux = len ? dx/len : 0, uy = len ? dy/len : 0;
           const headLen = Math.min(12, len * 0.3);
-          const ax1 = el.x2 - headLen * ux + headLen * 0.4 * uy;
-          const ay1 = el.y2 - headLen * uy - headLen * 0.4 * ux;
-          const ax2 = el.x2 - headLen * ux - headLen * 0.4 * uy;
-          const ay2 = el.y2 - headLen * uy + headLen * 0.4 * ux;
-          svg += `  <line x1="${el.x}" y1="${el.y}" x2="${el.x2}" y2="${el.y2}" stroke="${sc}" stroke-width="${sw}" opacity="${op}"${dash}${rot}/>\n`;
-          svg += `  <polygon points="${el.x2},${el.y2} ${ax1},${ay1} ${ax2},${ay2}" fill="${sc}" opacity="${op}"${rot}/>\n`;
+          const ax1 = endX - headLen * ux + headLen * 0.4 * uy;
+          const ay1 = endY - headLen * uy - headLen * 0.4 * ux;
+          const ax2 = endX - headLen * ux - headLen * 0.4 * uy;
+          const ay2 = endY - headLen * uy + headLen * 0.4 * ux;
+          svg += `  <polygon points="${endX},${endY} ${ax1},${ay1} ${ax2},${ay2}" fill="${sc}" opacity="${op}"${rot}/>\n`;
           break;
         }
         case "pencil":
@@ -2057,6 +2198,7 @@
     };
     switch (activeTool) {
       case "rect":
+      case "diamond":
       case "ellipse":
         return { ...base, x: wx, y: wy, w: 0, h: 0 };
       case "line":
@@ -2073,6 +2215,7 @@
     if (!el) return;
     switch (el.type) {
       case "rect":
+      case "diamond":
       case "ellipse":
       case "image":
         el.w = wx - startX; el.h = wy - startY;
@@ -2086,10 +2229,12 @@
 
   function moveElement(el, dx, dy) {
     switch (el.type) {
-      case "rect": case "ellipse": case "text": case "image":
+      case "rect": case "diamond": case "ellipse": case "text": case "image":
         el.x += dx; el.y += dy; break;
       case "line": case "arrow":
-        el.x += dx; el.y += dy; el.x2 += dx; el.y2 += dy; break;
+        if (el.pts) { el.pts = el.pts.map(p => ({ x: p.x + dx, y: p.y + dy })); }
+        else { el.x += dx; el.y += dy; el.x2 += dx; el.y2 += dy; }
+        break;
       case "pencil":
         el.pts = el.pts.map(p => ({ x: p.x + dx, y: p.y + dy })); break;
     }
@@ -2715,7 +2860,7 @@
   }
 
   function generateMermaid() {
-    const nodeEls = scene.elements.filter(e => e.type === "rect" || e.type === "ellipse");
+    const nodeEls = scene.elements.filter(e => e.type === "rect" || e.type === "diamond" || e.type === "ellipse");
     const edgeEls = scene.elements.filter(e => e.type === "arrow" || e.type === "line");
     const textEls = scene.elements.filter(e => e.type === "text");
 
@@ -2808,6 +2953,399 @@
   };
 
 
+  // ── Excalidraw conversion ─────────────────────────────────────────────────
+  const EX_FONT_TO_GODRAW = { 1: "hand", 2: "sans-serif", 3: "mono", 4: "serif" };
+  const GODRAW_FONT_TO_EX = { "hand": 1, "sans-serif": 2, "mono": 3, "serif": 4 };
+
+  function convertExcalidrawElement(exEl, files) {
+    if (exEl.isDeleted) return null;
+    const base = {
+      id: uid(),
+      strokeColor: exEl.strokeColor || "#1e1e2e",
+      fillColor: exEl.backgroundColor || "transparent",
+      strokeWidth: exEl.strokeWidth || 2,
+      strokeStyle: exEl.strokeStyle || "solid",
+      roughness: exEl.roughness ?? 0,
+      roundness: exEl.roundness ? "round" : "sharp",
+      opacity: exEl.opacity ?? 100,
+      angle: exEl.angle || 0,
+    };
+
+    switch (exEl.type) {
+      case "rectangle":
+        return { ...base, type: "rect", x: exEl.x, y: exEl.y, w: exEl.width, h: exEl.height };
+      case "diamond":
+        return { ...base, type: "diamond", x: exEl.x, y: exEl.y, w: exEl.width, h: exEl.height };
+      case "ellipse":
+        return { ...base, type: "ellipse", x: exEl.x, y: exEl.y, w: exEl.width, h: exEl.height };
+      case "text":
+        return {
+          ...base, type: "text", x: exEl.x, y: exEl.y,
+          w: exEl.width || 100, h: exEl.height || 24,
+          text: exEl.text || exEl.originalText || "",
+          fontSize: exEl.fontSize || 16,
+          fontFamily: EX_FONT_TO_GODRAW[exEl.fontFamily] || "sans-serif",
+        };
+      case "line":
+      case "arrow": {
+        const pts = exEl.points || [];
+        if (pts.length < 2) return null;
+        const absPts = pts.map(p => ({ x: exEl.x + p[0], y: exEl.y + p[1] }));
+        if (pts.length === 2) {
+          return {
+            ...base, type: exEl.type === "arrow" ? "arrow" : "line",
+            x: absPts[0].x, y: absPts[0].y, x2: absPts[1].x, y2: absPts[1].y,
+          };
+        }
+        return { ...base, type: exEl.type === "arrow" ? "arrow" : "line", pts: absPts };
+      }
+      case "freedraw": {
+        const pts = exEl.points || [];
+        if (pts.length < 2) return null;
+        return {
+          ...base, type: "pencil",
+          pts: pts.map(p => ({ x: exEl.x + p[0], y: exEl.y + p[1] })),
+        };
+      }
+      case "image": {
+        const el = { ...base, type: "image", x: exEl.x, y: exEl.y, w: exEl.width || 200, h: exEl.height || 150 };
+        if (exEl.fileId && files && files[exEl.fileId]) {
+          const f = files[exEl.fileId];
+          el.src = f.dataURL || (`data:${f.mimeType};base64,${f.data}`);
+        }
+        return el;
+      }
+      default:
+        return null;
+    }
+  }
+
+  function convertExcalidrawScene(exData) {
+    const exElements = exData.elements || [];
+    const files = exData.files || {};
+    const converted = [];
+    const boundTextMap = new Map(); // containerId → text element
+
+    // First pass: identify bound text elements
+    for (const exEl of exElements) {
+      if (exEl.type === "text" && exEl.containerId) {
+        boundTextMap.set(exEl.containerId, exEl);
+      }
+    }
+
+    // Second pass: convert elements
+    for (const exEl of exElements) {
+      if (exEl.isDeleted) continue;
+      // Skip standalone bound text — will be merged into container
+      if (exEl.type === "text" && exEl.containerId) continue;
+
+      const el = convertExcalidrawElement(exEl, files);
+      if (!el) continue;
+
+      // Merge bound text into container
+      const boundText = boundTextMap.get(exEl.id);
+      if (boundText) {
+        el.text = boundText.text || boundText.originalText || "";
+        el.fontSize = boundText.fontSize || 16;
+        el.fontFamily = EX_FONT_TO_GODRAW[boundText.fontFamily] || "sans-serif";
+      }
+
+      converted.push(el);
+    }
+
+    return converted;
+  }
+
+  function convertToExcalidrawElement(el) {
+    const base = {
+      id: el.id || uid(),
+      type: "rectangle",
+      x: el.x || 0,
+      y: el.y || 0,
+      width: 0,
+      height: 0,
+      angle: el.angle || 0,
+      strokeColor: el.strokeColor || "#1e1e2e",
+      backgroundColor: el.fillColor || "transparent",
+      fillStyle: "solid",
+      strokeWidth: el.strokeWidth || 2,
+      strokeStyle: el.strokeStyle || "solid",
+      roughness: el.roughness ?? 0,
+      opacity: el.opacity ?? 100,
+      groupIds: [],
+      roundness: el.roundness === "round" ? { type: 3 } : null,
+      seed: Math.floor(Math.random() * 2147483647),
+      version: 1,
+      isDeleted: false,
+      boundElements: null,
+      updated: Date.now(),
+      link: null,
+      locked: false,
+    };
+
+    switch (el.type) {
+      case "rect":
+        return { ...base, type: "rectangle", width: el.w || 0, height: el.h || 0 };
+      case "diamond":
+        return { ...base, type: "diamond", width: el.w || 0, height: el.h || 0 };
+      case "ellipse":
+        return { ...base, type: "ellipse", width: el.w || 0, height: el.h || 0 };
+      case "text":
+        return {
+          ...base, type: "text",
+          width: el.w || 100, height: el.h || 24,
+          text: el.text || "", originalText: el.text || "",
+          fontSize: el.fontSize || 16,
+          fontFamily: GODRAW_FONT_TO_EX[el.fontFamily] || 2,
+          textAlign: "left",
+          verticalAlign: "top",
+          baseline: (el.fontSize || 16),
+          lineHeight: 1.25,
+        };
+      case "line":
+      case "arrow": {
+        let points;
+        if (el.pts && el.pts.length > 1) {
+          const ox = el.pts[0].x, oy = el.pts[0].y;
+          points = el.pts.map(p => [p.x - ox, p.y - oy]);
+          base.x = ox; base.y = oy;
+        } else {
+          points = [[0, 0], [(el.x2 || 0) - (el.x || 0), (el.y2 || 0) - (el.y || 0)]];
+        }
+        return {
+          ...base, type: el.type === "arrow" ? "arrow" : "line",
+          width: 0, height: 0, points,
+          lastCommittedPoint: null, startBinding: null, endBinding: null,
+          startArrowhead: null,
+          endArrowhead: el.type === "arrow" ? "arrow" : null,
+        };
+      }
+      case "pencil": {
+        const pts = el.pts || [];
+        if (pts.length < 2) return null;
+        const ox = pts[0].x, oy = pts[0].y;
+        return {
+          ...base, type: "freedraw",
+          x: ox, y: oy,
+          width: 0, height: 0,
+          points: pts.map(p => [p.x - ox, p.y - oy]),
+          pressures: pts.map(() => 0.5),
+          simulatePressure: true,
+          lastCommittedPoint: null,
+        };
+      }
+      case "image":
+        return {
+          ...base, type: "image",
+          width: el.w || 200, height: el.h || 150,
+          status: "saved",
+        };
+      default:
+        return null;
+    }
+  }
+
+  function exportExcalidraw() {
+    const elements = scene.elements.map(convertToExcalidrawElement).filter(Boolean);
+    const data = {
+      type: "excalidraw",
+      version: 2,
+      source: "go-draw",
+      elements,
+      appState: { viewBackgroundColor: "#ffffff" },
+      files: {},
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (title || "drawing") + ".excalidraw";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Excalidraw import UI ────────────────────────────────────────────────
+  function importExcalidrawFile() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".excalidraw,.json";
+    input.onchange = () => {
+      if (!input.files || !input.files[0]) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          const elements = convertExcalidrawScene(data);
+          if (elements.length) {
+            snapshot();
+            scene.elements.push(...elements);
+            zoomToFit();
+            render();
+          }
+        } catch (err) {
+          console.error("go-draw: failed to import excalidraw file", err);
+        }
+      };
+      reader.readAsText(input.files[0]);
+    };
+    input.click();
+  }
+
+  function importExcalidrawLibrary() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".excalidrawlib,.json";
+    input.onchange = () => {
+      if (!input.files || !input.files[0]) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          showLibraryPicker(data);
+        } catch (err) {
+          console.error("go-draw: failed to import library", err);
+        }
+      };
+      reader.readAsText(input.files[0]);
+    };
+    input.click();
+  }
+
+  function showLibraryPicker(libData) {
+    const items = (libData.libraryItems || libData.library || []);
+    if (!items.length) return;
+
+    const { overlay, modal } = openModal(`
+      <h3>Library</h3>
+      <div class="lib-grid" id="lib-grid"></div>
+      <div class="modal-actions">
+        <button class="modal-btn modal-btn-secondary" id="lib-close">Close</button>
+      </div>
+    `);
+    modal.querySelector("#lib-close").addEventListener("click", () => closeModal(overlay));
+
+    const grid = modal.querySelector("#lib-grid");
+    for (const item of items) {
+      const elements = item.elements || [];
+      if (!elements.length) continue;
+
+      const card = document.createElement("div");
+      card.className = "lib-item";
+
+      // Mini canvas preview
+      const preview = document.createElement("canvas");
+      preview.className = "lib-preview";
+      preview.width = 100;
+      preview.height = 80;
+      card.appendChild(preview);
+
+      const name = document.createElement("div");
+      name.className = "lib-name";
+      name.textContent = item.name || item.id || "Item";
+      card.appendChild(name);
+
+      // Render preview
+      const pctx = preview.getContext("2d");
+      const converted = elements.map(e => convertExcalidrawElement(e, {})).filter(Boolean);
+      if (converted.length) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const c of converted) {
+          const bb = getBBox(c);
+          minX = Math.min(minX, bb.x);
+          minY = Math.min(minY, bb.y);
+          maxX = Math.max(maxX, bb.x + bb.w);
+          maxY = Math.max(maxY, bb.y + bb.h);
+        }
+        const cw = maxX - minX || 1, ch = maxY - minY || 1;
+        const s = Math.min(90 / cw, 70 / ch, 2);
+        pctx.translate(50 - (minX + maxX) / 2 * s, 40 - (minY + maxY) / 2 * s);
+        pctx.scale(s, s);
+        for (const c of converted) drawElement(pctx, c);
+      }
+
+      card.addEventListener("click", () => {
+        const newEls = elements.map(e => convertExcalidrawElement(e, {})).filter(Boolean);
+        if (!newEls.length) return;
+        // Center on viewport
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const c of newEls) {
+          const bb = getBBox(c);
+          minX = Math.min(minX, bb.x);
+          minY = Math.min(minY, bb.y);
+          maxX = Math.max(maxX, bb.x + bb.w);
+          maxY = Math.max(maxY, bb.y + bb.h);
+        }
+        const centerWx = (canvas.width / 2 - vp.x) / vp.scale;
+        const centerWy = (canvas.height / 2 - vp.y) / vp.scale;
+        const offX = centerWx - (minX + maxX) / 2;
+        const offY = centerWy - (minY + maxY) / 2;
+        for (const c of newEls) {
+          c.id = uid();
+          moveElement(c, offX, offY);
+        }
+        snapshot();
+        scene.elements.push(...newEls);
+        selectedIds = new Set(newEls.map(c => c.id));
+        render();
+        closeModal(overlay);
+      });
+
+      grid.appendChild(card);
+    }
+  }
+
+  // ── #addLibrary URL hash integration ─────────────────────────────────────
+  async function checkAddLibraryHash() {
+    const hash = window.location.hash;
+    if (!hash.startsWith("#addLibrary=")) return;
+    const url = decodeURIComponent(hash.slice("#addLibrary=".length));
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      showLibraryPicker(data);
+    } catch (err) {
+      console.error("go-draw: failed to fetch library from URL", err);
+    }
+  }
+
+  // ── Drag and drop ──────────────────────────────────────────────────────
+  function setupDragDrop() {
+    canvas.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    });
+    canvas.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const files = e.dataTransfer.files;
+      if (!files || !files.length) return;
+      const file = files[0];
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          if (data.type === "excalidraw") {
+            // .excalidraw scene file
+            const elements = convertExcalidrawScene(data);
+            if (elements.length) {
+              snapshot();
+              scene.elements.push(...elements);
+              zoomToFit();
+              render();
+            }
+          } else if (data.libraryItems || data.library) {
+            // .excalidrawlib library file
+            showLibraryPicker(data);
+          }
+        } catch (err) {
+          console.error("go-draw: failed to parse dropped file", err);
+        }
+      };
+      reader.readAsText(file);
+    });
+  }
+
   // ── Init ──────────────────────────────────────────────────────────────────
   buildUI();
   applyDarkMode();
@@ -2832,7 +3370,12 @@
     }
   };
 
-  loadDrawing();
+  loadDrawing().then(() => {
+    if (IS_EDIT) checkAddLibraryHash();
+  });
+
+  // Drag and drop support
+  if (IS_EDIT) setupDragDrop();
 
   // Notify parent that canvas is ready
   postToParent("ready", { id: CFG.id, mode: CFG.mode });
