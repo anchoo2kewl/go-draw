@@ -34,10 +34,15 @@
 
     // Iframe
     const iframe = document.createElement("iframe");
-    iframe.src = src;
+    const hostDark = document.documentElement.classList.contains("dark");
+    iframe.src = src + (hostDark ? (src.includes("?") ? "&" : "?") + "theme=dark" : "");
     iframe.style.cssText = "width:100%;height:100%;border:none;border-radius:8px;display:block;";
     iframe.setAttribute("allowfullscreen", "");
     iframe.setAttribute("loading", "lazy");
+    iframe.addEventListener("load", () => {
+      const dark = document.documentElement.classList.contains("dark");
+      iframe.contentWindow.postMessage({ source: "go-draw-host", type: "set-dark-mode", dark }, "*");
+    });
     container.appendChild(iframe);
 
     // ── Drag handle (bottom-right corner) ──────────────────────────────
@@ -188,6 +193,8 @@
         cursor:ns-resize; z-index:10;
       }
       .godraw-resize-bottom:hover { background:rgba(59,130,246,0.15); border-radius:4px; }
+      .dark .godraw-embed { border-color:#333; background:#1a1a2e; }
+      .dark .godraw-resize-handle { background:linear-gradient(135deg, transparent 50%, #555 50%); }
     `;
     document.head.appendChild(s);
   }
@@ -212,6 +219,16 @@
         }
       }
     }).observe(document.body, { childList: true, subtree: true });
+  }
+
+  // ── Watch host theme changes and relay to all embedded iframes ────────
+  if (typeof MutationObserver !== "undefined") {
+    new MutationObserver(() => {
+      const dark = document.documentElement.classList.contains("dark");
+      document.querySelectorAll(".godraw-embed-initialized iframe").forEach(f => {
+        f.contentWindow.postMessage({ source: "go-draw-host", type: "set-dark-mode", dark }, "*");
+      });
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
   }
 
   // ── Public API ────────────────────────────────────────────────────────

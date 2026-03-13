@@ -68,6 +68,7 @@
 
   // ── Dark mode ──────────────────────────────────────────────────────────
   let darkMode = localStorage.getItem("godraw-dark") === "true";
+  if (new URLSearchParams(window.location.search).get("theme") === "dark") darkMode = true;
 
   // ── Eraser state ─────────────────────────────────────────────────────────
   let eraserActive = false;
@@ -598,6 +599,12 @@
         break;
       case "get-size":
         postToParent("size", { width: canvas.width, height: canvas.height });
+        break;
+      case "set-dark-mode":
+        darkMode = !!e.data.dark;
+        localStorage.setItem("godraw-dark", darkMode);
+        applyDarkMode();
+        render();
         break;
     }
   });
