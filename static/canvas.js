@@ -69,6 +69,8 @@
   // ── Dark mode ──────────────────────────────────────────────────────────
   let darkMode = localStorage.getItem("godraw-dark") === "true";
   if (new URLSearchParams(window.location.search).get("theme") === "dark") darkMode = true;
+  const darkOverrideKey = "godraw-dark-override:" + CFG.id;
+  let darkModeOverride = sessionStorage.getItem(darkOverrideKey) === "true";
 
   // ── Eraser state ─────────────────────────────────────────────────────────
   let eraserActive = false;
@@ -601,6 +603,7 @@
         postToParent("size", { width: canvas.width, height: canvas.height });
         break;
       case "set-dark-mode":
+        if (darkModeOverride) break;
         darkMode = !!e.data.dark;
         localStorage.setItem("godraw-dark", darkMode);
         applyDarkMode();
@@ -2352,6 +2355,8 @@
   function toggleDarkMode() {
     darkMode = !darkMode;
     localStorage.setItem("godraw-dark", darkMode);
+    darkModeOverride = true;
+    sessionStorage.setItem(darkOverrideKey, "true");
     applyDarkMode();
     render();
   }
