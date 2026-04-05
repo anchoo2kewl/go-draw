@@ -50,6 +50,7 @@
   let isResizing = false;
   let resizeHandle = "";       // "nw","ne","sw","se" for shapes; "start","end" for lines
   let resizeOriginal = null;   // snapshot of element before resize
+  let groupTransform = null;   // { mode, handle, bbox, center, originals:Map<id,el> }
   let textInput = null;
 
   // ── Clipboard (internal copy/paste) ──────────────────────────────────────
@@ -1609,12 +1610,12 @@
     ctx.restore();
   }
 
-  // Draw a single combined selection box around grouped elements.
-  function drawGroupSelection(ctx, group) {
+  // Compute the combined axis-aligned bounding box for a set of elements,
+  // accounting for each element's own rotation.
+  function getElementsBBox(elements) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const el of group) {
+    for (const el of elements) {
       const bb = getBBox(el);
-      // Apply element rotation to get the world-space axis-aligned bounds.
       const angle = el.angle || 0;
       if (!angle) {
         minX = Math.min(minX, bb.x); minY = Math.min(minY, bb.y);
@@ -1628,21 +1629,120 @@
         }
       }
     }
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }
+
+  // Combined selection box + corner + rotation handles for a group.
+  function drawGroupSelection(ctx, group) {
+    const bb = getElementsBBox(group);
     const pad = 6;
     ctx.save();
     ctx.strokeStyle = "#3b82f6";
     ctx.lineWidth = 1.5 / vp.scale;
     ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
-    ctx.strokeRect(minX - pad, minY - pad, maxX - minX + pad * 2, maxY - minY + pad * 2);
+    ctx.strokeRect(bb.x - pad, bb.y - pad, bb.w + pad * 2, bb.h + pad * 2);
     ctx.setLineDash([]);
-    // Four corner dots
-    for (const [hx, hy] of [[minX-pad,minY-pad],[maxX+pad,minY-pad],[minX-pad,maxY+pad],[maxX+pad,maxY+pad]]) {
+    // Corner handles
+    for (const [hx, hy] of [
+      [bb.x-pad, bb.y-pad], [bb.x+bb.w+pad, bb.y-pad],
+      [bb.x-pad, bb.y+bb.h+pad], [bb.x+bb.w+pad, bb.y+bb.h+pad],
+    ]) {
       ctx.beginPath();
       ctx.arc(hx, hy, 4 / vp.scale, 0, Math.PI * 2);
       ctx.fillStyle = "#fff"; ctx.fill();
       ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 1.5 / vp.scale; ctx.stroke();
     }
+    // Rotation handle
+    const handleDist = ROTATE_HANDLE_DIST / vp.scale;
+    const stemX = bb.x + bb.w / 2;
+    const stemTopY = bb.y - pad;
+    const handleY = stemTopY - handleDist;
+    ctx.beginPath();
+    ctx.moveTo(stemX, stemTopY); ctx.lineTo(stemX, handleY);
+    ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 1 / vp.scale; ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(stemX, handleY, 5 / vp.scale, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 1.5 / vp.scale; ctx.stroke();
     ctx.restore();
+  }
+
+  // Return the group handle at (wx, wy) or null.
+  // Handles: "nw","ne","sw","se","rotate".
+  function hitTestGroupHandles(bb, wx, wy) {
+    const pad = 6;
+    const threshold = 10 / vp.scale;
+    const handles = {
+      nw: { x: bb.x - pad, y: bb.y - pad },
+      ne: { x: bb.x + bb.w + pad, y: bb.y - pad },
+      sw: { x: bb.x - pad, y: bb.y + bb.h + pad },
+      se: { x: bb.x + bb.w + pad, y: bb.y + bb.h + pad },
+      rotate: { x: bb.x + bb.w / 2, y: bb.y - pad - ROTATE_HANDLE_DIST / vp.scale },
+    };
+    for (const [k, p] of Object.entries(handles)) {
+      if (Math.hypot(wx - p.x, wy - p.y) < threshold) return k;
+    }
+    return null;
+  }
+
+  // Apply a scale+translate to a single element. Scaling is relative to the
+  // fixed corner (fx, fy) by factor s. Mutates the element in place.
+  function scaleElement(el, fx, fy, sx, sy) {
+    switch (el.type) {
+      case "rect": case "diamond": case "ellipse": case "text": case "image": {
+        el.x = fx + (el.x - fx) * sx;
+        el.y = fy + (el.y - fy) * sy;
+        el.w *= sx; el.h *= sy;
+        break;
+      }
+      case "line": case "arrow": {
+        if (el.pts) {
+          el.pts = el.pts.map(p => ({ x: fx + (p.x - fx) * sx, y: fy + (p.y - fy) * sy }));
+        } else {
+          el.x = fx + (el.x - fx) * sx; el.y = fy + (el.y - fy) * sy;
+          el.x2 = fx + (el.x2 - fx) * sx; el.y2 = fy + (el.y2 - fy) * sy;
+        }
+        if (el.cp) el.cp = { x: fx + (el.cp.x - fx) * sx, y: fy + (el.cp.y - fy) * sy };
+        break;
+      }
+      case "pencil": {
+        if (el.pts) {
+          el.pts = el.pts.map(p => ({ x: fx + (p.x - fx) * sx, y: fy + (p.y - fy) * sy }));
+        }
+        break;
+      }
+    }
+  }
+
+  // Rotate a single element around (cx, cy) by delta radians.
+  function rotateElementAround(el, cx, cy, delta) {
+    const rotPt = (p) => rotatePoint(p.x, p.y, cx, cy, delta);
+    switch (el.type) {
+      case "rect": case "diamond": case "ellipse": case "text": case "image": {
+        // Rotate element center around group center, keep size.
+        const ec = { x: el.x + el.w / 2, y: el.y + el.h / 2 };
+        const r = rotPt(ec);
+        el.x = r.x - el.w / 2; el.y = r.y - el.h / 2;
+        el.angle = (el.angle || 0) + delta;
+        break;
+      }
+      case "line": case "arrow": {
+        if (el.pts) {
+          el.pts = el.pts.map(p => rotPt(p));
+        } else {
+          const s = rotPt({ x: el.x, y: el.y }); el.x = s.x; el.y = s.y;
+          const e2 = rotPt({ x: el.x2, y: el.y2 }); el.x2 = e2.x; el.y2 = e2.y;
+        }
+        if (el.cp) el.cp = rotPt(el.cp);
+        // Lines can have their own angle too; compose.
+        if (el.angle) el.angle += delta;
+        break;
+      }
+      case "pencil": {
+        if (el.pts) el.pts = el.pts.map(p => rotPt(p));
+        break;
+      }
+    }
   }
 
   function getRotationHandlePos(el) {
@@ -1841,6 +1941,27 @@
     }
 
     if (activeTool === "select") {
+      // Check group handles first when a group of elements is selected.
+      if (selectedIds.size > 1) {
+        const selArr = scene.elements.filter(el => selectedIds.has(el.id));
+        const groupBB = getElementsBBox(selArr);
+        const gh = hitTestGroupHandles(groupBB, wx, wy);
+        if (gh) {
+          const originals = new Map();
+          for (const el of selArr) originals.set(el.id, JSON.parse(JSON.stringify(el)));
+          groupTransform = {
+            mode: gh === "rotate" ? "rotate" : "resize",
+            handle: gh,
+            bbox: groupBB,
+            center: { x: groupBB.x + groupBB.w / 2, y: groupBB.y + groupBB.h / 2 },
+            originals,
+            rotateStartAngle: Math.atan2(wy - (groupBB.y + groupBB.h / 2), wx - (groupBB.x + groupBB.w / 2)),
+          };
+          snapshot();
+          canvas.style.cursor = gh === "rotate" ? "grabbing" : (HANDLE_CURSORS[gh] || "default");
+          return;
+        }
+      }
       // Check rotation handle first (only when exactly one element selected)
       if (selectedIds.size === 1) {
         const sel = scene.elements.find(e => selectedIds.has(e.id));
@@ -2020,6 +2141,46 @@
       }
     }
 
+    // Group transform (resize or rotate a whole group)
+    if (groupTransform) {
+      const gt = groupTransform;
+      if (gt.mode === "rotate") {
+        const ang = Math.atan2(wy - gt.center.y, wx - gt.center.x);
+        let delta = ang - gt.rotateStartAngle;
+        if (e.shiftKey) delta = Math.round(delta / (Math.PI / 12)) * (Math.PI / 12);
+        for (const el of scene.elements) {
+          if (!gt.originals.has(el.id)) continue;
+          const orig = gt.originals.get(el.id);
+          // Reset element to original, then rotate fresh.
+          Object.assign(el, JSON.parse(JSON.stringify(orig)));
+          rotateElementAround(el, gt.center.x, gt.center.y, delta);
+        }
+      } else {
+        // Resize: fixed point is the opposite corner of the dragged handle.
+        const bb = gt.bbox;
+        const fx = (gt.handle === "nw" || gt.handle === "sw") ? bb.x + bb.w : bb.x;
+        const fy = (gt.handle === "nw" || gt.handle === "ne") ? bb.y + bb.h : bb.y;
+        const newW = Math.max(4, Math.abs(wx - fx));
+        const newH = Math.max(4, Math.abs(wy - fy));
+        // Uniform scale by default (preserves aspect); Shift allows non-uniform.
+        let sx = newW / bb.w, sy = newH / bb.h;
+        if (!e.shiftKey) {
+          const u = Math.hypot(newW, newH) / Math.hypot(bb.w, bb.h);
+          sx = u; sy = u;
+        }
+        // Prevent negative (flipping) for simplicity.
+        sx = Math.max(0.05, sx); sy = Math.max(0.05, sy);
+        for (const el of scene.elements) {
+          if (!gt.originals.has(el.id)) continue;
+          const orig = gt.originals.get(el.id);
+          Object.assign(el, JSON.parse(JSON.stringify(orig)));
+          scaleElement(el, fx, fy, sx, sy);
+        }
+      }
+      render();
+      return;
+    }
+
     // Rotation dragging
     if (isRotating && selectedIds.size === 1) {
       const sel = scene.elements.find(e => selectedIds.has(e.id));
@@ -2131,6 +2292,7 @@
       return;
     }
     if (eraserActive) { eraserActive = false; erasedIds = new Set(); return; }
+    if (groupTransform) { groupTransform = null; canvas.style.cursor = "default"; return; }
     if (isRotating) { isRotating = false; canvas.style.cursor = "default"; return; }
     if (isResizing) { isResizing = false; resizeHandle = ""; resizeOriginal = null; canvas.style.cursor = "default"; return; }
     if (isDragging) { isDragging = false; snapshot(); return; }
