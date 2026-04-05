@@ -1027,8 +1027,21 @@
 
     // Selection handles
     if (IS_EDIT) {
+      // Group selected elements by groupId so a whole library item shows a
+      // single combined bounding box instead of one per element.
+      const drawnGroups = new Set();
       for (const el of scene.elements) {
-        if (selectedIds.has(el.id)) drawSelection(ctx, el);
+        if (!selectedIds.has(el.id)) continue;
+        if (el.groupId) {
+          if (drawnGroups.has(el.groupId)) continue;
+          const groupMembers = scene.elements.filter(e => e.groupId === el.groupId && selectedIds.has(e.id));
+          if (groupMembers.length > 1) {
+            drawGroupSelection(ctx, groupMembers);
+            drawnGroups.add(el.groupId);
+            continue;
+          }
+        }
+        drawSelection(ctx, el);
       }
     }
 
@@ -1596,6 +1609,42 @@
     ctx.restore();
   }
 
+  // Draw a single combined selection box around grouped elements.
+  function drawGroupSelection(ctx, group) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const el of group) {
+      const bb = getBBox(el);
+      // Apply element rotation to get the world-space axis-aligned bounds.
+      const angle = el.angle || 0;
+      if (!angle) {
+        minX = Math.min(minX, bb.x); minY = Math.min(minY, bb.y);
+        maxX = Math.max(maxX, bb.x + bb.w); maxY = Math.max(maxY, bb.y + bb.h);
+      } else {
+        const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+        for (const [px, py] of [[bb.x,bb.y],[bb.x+bb.w,bb.y],[bb.x,bb.y+bb.h],[bb.x+bb.w,bb.y+bb.h]]) {
+          const r = rotatePoint(px, py, cx, cy, angle);
+          minX = Math.min(minX, r.x); minY = Math.min(minY, r.y);
+          maxX = Math.max(maxX, r.x); maxY = Math.max(maxY, r.y);
+        }
+      }
+    }
+    const pad = 6;
+    ctx.save();
+    ctx.strokeStyle = "#3b82f6";
+    ctx.lineWidth = 1.5 / vp.scale;
+    ctx.setLineDash([4 / vp.scale, 3 / vp.scale]);
+    ctx.strokeRect(minX - pad, minY - pad, maxX - minX + pad * 2, maxY - minY + pad * 2);
+    ctx.setLineDash([]);
+    // Four corner dots
+    for (const [hx, hy] of [[minX-pad,minY-pad],[maxX+pad,minY-pad],[minX-pad,maxY+pad],[maxX+pad,maxY+pad]]) {
+      ctx.beginPath();
+      ctx.arc(hx, hy, 4 / vp.scale, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 1.5 / vp.scale; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function getRotationHandlePos(el) {
     const bb = getBBox(el);
     const pad = 6;
@@ -1822,13 +1871,19 @@
       // Hit test in reverse (topmost first)
       const hit = [...scene.elements].reverse().find(el => hitTest(el, wx, wy));
       if (hit) {
+        // If the element is part of a group, expand the hit to the whole group
+        // so clicking any piece selects the whole library item.
+        const hitIds = hit.groupId
+          ? scene.elements.filter(el => el.groupId === hit.groupId).map(el => el.id)
+          : [hit.id];
         if (e.shiftKey) {
-          // Shift+click: toggle element in/out of selection
+          // Shift+click: toggle group in/out of selection
           selectedIds = new Set(selectedIds);
-          if (selectedIds.has(hit.id)) selectedIds.delete(hit.id);
-          else selectedIds.add(hit.id);
+          const allIn = hitIds.every(id => selectedIds.has(id));
+          if (allIn) hitIds.forEach(id => selectedIds.delete(id));
+          else hitIds.forEach(id => selectedIds.add(id));
         } else if (!selectedIds.has(hit.id)) {
-          selectedIds = new Set([hit.id]);
+          selectedIds = new Set(hitIds);
         }
         isDragging = true;
         dragOffset = { x: wx - startX, y: wy - startY };
@@ -1883,6 +1938,7 @@
             imgEl.h = imgEl.w * (img.naturalHeight / img.naturalWidth);
           }
           scene.elements.push(imgEl);
+          setTool("select");
           selectedIds = new Set([imgEl.id]);
           render();
         } catch (err) {
@@ -3799,8 +3855,12 @@
         const centerWy = (canvas.height / 2 - vp.y) / vp.scale;
         const offX = centerWx - (minX + maxX) / 2;
         const offY = centerWy - (minY + maxY) / 2;
+        // Share a single groupId across all library elements so clicking any of
+        // them selects the whole item (like Excalidraw).
+        const groupId = "lib-" + uid();
         for (const c of newEls) {
           c.id = uid();
+          c.groupId = groupId;
           moveElement(c, offX, offY);
         }
         snapshot();
