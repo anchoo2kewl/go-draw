@@ -29,6 +29,7 @@
   let fontFamily = "hand";       // "hand" | "sans-serif" | "mono" | "serif"
   let textAlign = "center";     // "left" | "center" | "right"
   let strokeStyle = "solid";   // "solid" | "dashed" | "dotted"
+  let fillStyle = "hachure";   // "hachure" | "cross-hatch" | "solid"
   let roughness = 0;           // 0=architect, 1=artist, 2=cartoonist
   let roundness = "sharp";     // "sharp" | "round"
   let opacity = 100;           // 0-100
@@ -58,11 +59,13 @@
   let marquee = null; // { x, y, w, h } in world coords while dragging
 
   // ── Font family map ─────────────────────────────────────────────────────
+  // "hand" uses Virgil (Excalidraw's handwriting font) loaded from
+  // {basePath}/static/Virgil.woff2 via @font-face in injectStyles().
   const FONT_CSS = {
     "sans-serif": '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     "serif":      '"Georgia", "Times New Roman", serif',
     "mono":       '"SFMono-Regular", "Consolas", "Liberation Mono", monospace',
-    "hand":       '"Segoe Print", "Comic Sans MS", cursive',
+    "hand":       '"Virgil", "Segoe Print", "Comic Sans MS", cursive',
   };
   function fontCSS(ff) { return FONT_CSS[ff] || FONT_CSS["sans-serif"]; }
 
@@ -232,20 +235,41 @@
         setTool(btn.dataset.tool);
       });
 
-      // ── Main area (sidebar + canvas) ───────────────────────────────────
+      // ── Main area (canvas with floating sidebar overlay) ──────────────
       const mainArea = el("div", { id: "main-area" });
-
-      const sidebar = buildSidebar();
-      mainArea.appendChild(sidebar);
 
       const wrap = el("div", { id: "canvas-wrap" });
       canvas = el("canvas", { id: "canvas" });
       wrap.appendChild(canvas);
+
+      // Sidebar is an absolute-positioned floating panel over the canvas,
+      // so hiding it gives the user a full-width canvas (Excalidraw-style).
+      const sidebar = buildSidebar();
+      wrap.appendChild(sidebar);
+
+      // Collapsed-sidebar re-open button (appears when sidebar is hidden).
+      const sidebarOpenBtn = el("button", {
+        id: "sidebar-open-btn",
+        title: "Show properties panel ([)",
+      });
+      sidebarOpenBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M6 3l5 5-5 5V3z"/></svg>';
+      sidebarOpenBtn.addEventListener("click", () => setSidebarHidden(false));
+      wrap.appendChild(sidebarOpenBtn);
+
       mainArea.appendChild(wrap);
       app.appendChild(mainArea);
 
       buildFloatingBar(wrap);
       wireSidebar();
+
+      // Restore persisted sidebar-hidden state.
+      if (localStorage.getItem("godraw-sidebar-hidden") === "true") {
+        setSidebarHidden(true);
+      }
+      // Restore persisted zen-mode state.
+      if (localStorage.getItem("godraw-zen") === "true") {
+        document.body.classList.add("godraw-zen");
+      }
     } else {
       // ── View mode: just canvas ─────────────────────────────────────────
       const wrap = el("div", { id: "canvas-wrap" });
@@ -268,12 +292,23 @@
 
     // Listen for fullscreen changes
     document.addEventListener("fullscreenchange", onFullscreenChange);
+
+    // Preload Virgil so canvas fillText picks it up without a flash of fallback.
+    if (document.fonts && document.fonts.load) {
+      document.fonts.load('16px "Virgil"').then(() => {
+        cssFontMetricsCache.clear();
+        render();
+      }).catch(() => {});
+    }
   }
 
   // ── Sidebar ───────────────────────────────────────────────────────────────
   function buildSidebar() {
     const sb = el("div", { id: "sidebar" });
     sb.innerHTML = `
+      <button id="sidebar-close-btn" title="Hide properties panel ([)" aria-label="Hide panel">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M10 3L5 8l5 5V3z"/></svg>
+      </button>
       <div class="sb-section">
         <div class="sb-label">Stroke</div>
         <div class="sb-row" id="stroke-swatches">
@@ -294,6 +329,20 @@
           <button class="swatch" data-color="#a5d8ff" style="background:#a5d8ff" title="Blue"></button>
           <button class="swatch" data-color="#ffec99" style="background:#ffec99" title="Yellow"></button>
           <input type="color" id="fill-color-picker" value="#ffffff" title="Custom color">
+        </div>
+      </div>
+      <div class="sb-section">
+        <div class="sb-label">Fill</div>
+        <div class="sb-row" id="fs-fill-btns">
+          <button class="sb-btn" data-prop="fillStyle" data-val="hachure" title="Hachure">
+            <svg width="20" height="20" viewBox="0 0 20 20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"><line x1="5" y1="15" x2="15" y2="5"/><line x1="3" y1="11" x2="9" y2="5"/><line x1="9" y1="17" x2="17" y2="9"/></svg>
+          </button>
+          <button class="sb-btn" data-prop="fillStyle" data-val="cross-hatch" title="Cross-hatch">
+            <svg width="20" height="20" viewBox="0 0 20 20" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"><line x1="5" y1="15" x2="15" y2="5"/><line x1="5" y1="5" x2="15" y2="15"/><line x1="3" y1="11" x2="9" y2="5"/><line x1="11" y1="5" x2="17" y2="11"/></svg>
+          </button>
+          <button class="sb-btn" data-prop="fillStyle" data-val="solid" title="Solid">
+            <svg width="20" height="20" viewBox="0 0 20 20"><rect x="4" y="4" width="12" height="12" rx="1" fill="currentColor"/></svg>
+          </button>
         </div>
       </div>
       <div class="sb-section">
@@ -428,9 +477,37 @@
     return sb;
   }
 
+  function setSidebarHidden(hidden) {
+    const sb = document.getElementById("sidebar");
+    const openBtn = document.getElementById("sidebar-open-btn");
+    if (!sb) return;
+    sb.classList.toggle("hidden", hidden);
+    if (openBtn) openBtn.classList.toggle("visible", hidden);
+    localStorage.setItem("godraw-sidebar-hidden", hidden ? "true" : "false");
+  }
+
+  function toggleSidebar() {
+    const sb = document.getElementById("sidebar");
+    if (!sb) return;
+    setSidebarHidden(!sb.classList.contains("hidden"));
+  }
+
+  function setZenMode(on) {
+    document.body.classList.toggle("godraw-zen", on);
+    localStorage.setItem("godraw-zen", on ? "true" : "false");
+    // Canvas resize since topbar height changes.
+    if (canvas) { resizeCanvas(); render(); }
+  }
+
+  function toggleZenMode() {
+    setZenMode(!document.body.classList.contains("godraw-zen"));
+  }
+
   function wireSidebar() {
     const sb = document.getElementById("sidebar");
     if (!sb) return;
+    const closeBtn = sb.querySelector("#sidebar-close-btn");
+    if (closeBtn) closeBtn.addEventListener("click", () => setSidebarHidden(true));
 
     // Stroke swatches
     sb.querySelectorAll("#stroke-swatches .swatch").forEach(btn => {
@@ -452,6 +529,11 @@
     // Stroke style
     sb.querySelectorAll("#ss-btns .sb-btn").forEach(btn => {
       btn.addEventListener("click", () => setProp("strokeStyle", btn.dataset.val));
+    });
+
+    // Fill style
+    sb.querySelectorAll("#fs-fill-btns .sb-btn").forEach(btn => {
+      btn.addEventListener("click", () => setProp("fillStyle", btn.dataset.val));
     });
 
     // Roughness
@@ -535,6 +617,14 @@
     newBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>';
     newBtn.addEventListener("click", createNewCanvas);
     bar.appendChild(newBtn);
+
+    if (IS_EDIT) {
+      // Zen mode toggle — hides topbar + sidebar for a distraction-free canvas.
+      const zenBtn = el("button", { id: "btn-zen", title: "Zen mode (Alt+Z)" });
+      zenBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 8h6M8 5v6" stroke-linecap="round"/></svg>';
+      zenBtn.addEventListener("click", toggleZenMode);
+      bar.appendChild(zenBtn);
+    }
 
     wrap.appendChild(bar);
   }
@@ -634,7 +724,15 @@
     if (document.getElementById("godraw-styles")) return;
     const s = document.createElement("style");
     s.id = "godraw-styles";
+    const fontBase = (CFG.basePath || "/draw") + "/static/Virgil.woff2";
     s.textContent = `
+      @font-face {
+        font-family: "Virgil";
+        src: url("${fontBase}") format("woff2");
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
       #app { display:flex; flex-direction:column; width:100%; height:100%; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
       #topbar { display:flex; align-items:center; gap:8px; padding:6px 12px; background:#fff; border-bottom:1px solid #e0e0e0; flex-shrink:0; z-index:10; }
       .top-left,.top-right { display:flex; align-items:center; gap:6px; }
@@ -654,11 +752,34 @@
       #btn-save:hover { background:#333; }
       #save-status { font-size:.75rem; color:#888; }
 
-      /* Main area: sidebar + canvas */
+      /* Main area: canvas fills; sidebar floats over it */
       #main-area { display:flex; flex:1; overflow:hidden; }
 
-      /* Sidebar */
-      #sidebar { width:202px; background:#fff; border-right:1px solid #e0e0e0; overflow-y:auto; flex-shrink:0; padding:4px 0; }
+      /* Sidebar — floating overlay on the left of the canvas */
+      #sidebar {
+        position:absolute; top:12px; left:12px; bottom:12px; width:202px; z-index:15;
+        background:#fff; border:1px solid #e4e4e7; border-radius:12px;
+        box-shadow:0 4px 20px rgba(0,0,0,0.08);
+        overflow-y:auto; padding:8px 0 12px;
+        transition:transform .18s ease, opacity .18s ease;
+      }
+      #sidebar.hidden { transform:translateX(-230px); opacity:0; pointer-events:none; }
+      #sidebar-close-btn {
+        position:absolute; top:6px; right:6px; width:22px; height:22px;
+        border:none; border-radius:6px; background:transparent; color:#999; cursor:pointer;
+        display:flex; align-items:center; justify-content:center; padding:0;
+      }
+      #sidebar-close-btn:hover { background:#f0f0f0; color:#333; }
+      #sidebar-open-btn {
+        position:absolute; top:14px; left:0; width:22px; height:40px; z-index:14;
+        background:#fff; border:1px solid #e4e4e7; border-left:none;
+        border-top-right-radius:8px; border-bottom-right-radius:8px;
+        box-shadow:0 2px 8px rgba(0,0,0,0.08); color:#666; cursor:pointer;
+        display:none; align-items:center; justify-content:center; padding:0;
+        transition:background .15s;
+      }
+      #sidebar-open-btn.visible { display:flex; }
+      #sidebar-open-btn:hover { background:#f8f8f8; color:#1e1e2e; }
       .sb-section { padding:6px 12px; border-bottom:1px solid #f0f0f0; }
       .sb-section:last-child { border-bottom:none; }
       .sb-label { font-size:0.68rem; color:#999; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:4px; font-weight:500; }
@@ -770,9 +891,15 @@
       .godraw-dark .lib-browser-desc { color:#888; }
       .godraw-dark #lib-search { background:#2a2a3e; color:#e0e0e0; border-color:#444; }
 
+      /* Zen mode — hides topbar + sidebar for distraction-free canvas */
+      .godraw-zen #topbar { display:none; }
+      .godraw-zen #sidebar { transform:translateX(-230px); opacity:0; pointer-events:none; }
+      .godraw-zen #sidebar-open-btn { display:none !important; }
+
       /* Responsive: collapse sidebar */
       @media (max-width:580px) {
-        #sidebar { width:48px; padding:2px 0; }
+        #sidebar { width:52px; top:8px; left:8px; bottom:8px; padding:24px 0 6px; }
+        #sidebar-close-btn { right:4px; top:4px; }
         .sb-label { display:none; }
         .sb-section { padding:4px; }
         .sb-row { justify-content:center; }
@@ -834,7 +961,7 @@
   function roughLine(ctx, x1, y1, x2, y2, rough, rng) {
     const len = Math.hypot(x2 - x1, y2 - y1);
     if (len < 0.1) return;
-    const amp = rough * Math.min(len * 0.08, 6);
+    const amp = rough * Math.min(len * 0.05, 3.5);
     const dx = x2 - x1, dy = y2 - y1;
     const nx = -dy / len, ny = dx / len;
     const cpx = (x1 + x2) / 2 + nx * (rng() - 0.5) * amp * 2;
@@ -844,19 +971,19 @@
   }
 
   function roughEllipse(ctx, cx, cy, rx, ry, rough, rng) {
-    const steps = 24;
+    const steps = 32;
     const maxR = Math.max(rx, ry);
-    const amp = rough * Math.min(maxR * 0.05, 4);
-    const sx = cx + (rx + (rng() - 0.5) * amp * 2);
-    const sy = cy + (rng() - 0.5) * amp;
+    const amp = rough * Math.min(maxR * 0.03, 2.5);
+    const sx = cx + (rx + (rng() - 0.5) * amp * 1.5);
+    const sy = cy + (rng() - 0.5) * amp * 0.8;
     ctx.moveTo(sx, sy);
     for (let i = 1; i <= steps; i++) {
       const a = (i / steps) * Math.PI * 2;
-      const x = cx + Math.cos(a) * (rx + (rng() - 0.5) * amp * 2);
-      const y = cy + Math.sin(a) * (ry + (rng() - 0.5) * amp * 2);
+      const x = cx + Math.cos(a) * (rx + (rng() - 0.5) * amp * 1.5);
+      const y = cy + Math.sin(a) * (ry + (rng() - 0.5) * amp * 1.5);
       const pa = ((i - 0.5) / steps) * Math.PI * 2;
-      const cpx = cx + Math.cos(pa) * (rx + (rng() - 0.5) * amp * 3);
-      const cpy = cy + Math.sin(pa) * (ry + (rng() - 0.5) * amp * 3);
+      const cpx = cx + Math.cos(pa) * (rx + (rng() - 0.5) * amp * 1.8);
+      const cpy = cy + Math.sin(pa) * (ry + (rng() - 0.5) * amp * 1.8);
       ctx.quadraticCurveTo(cpx, cpy, x, y);
     }
   }
@@ -981,27 +1108,94 @@
     ctx.restore();
   }
 
+  // Cache of CSS-measured metrics per (font-family, size). We probe the real
+  // DOM so the canvas text can be positioned to pixel-match an HTML textarea
+  // with the same font/line-height.
+  const cssFontMetricsCache = new Map();
+  function getCssFontMetrics(fontFamily, fs) {
+    const key = fontFamily + "|" + fs;
+    const cached = cssFontMetricsCache.get(key);
+    if (cached) return cached;
+    const probe = document.createElement("div");
+    probe.style.cssText = `position:absolute;left:-9999px;top:0;visibility:hidden;
+      font-size:${fs}px;font-family:${fontCSS(fontFamily)};
+      line-height:1.3;white-space:nowrap;margin:0;padding:0;border:0;`;
+    // vertical-align:baseline span gives us the baseline Y.
+    const baselineSpan = document.createElement("span");
+    baselineSpan.style.cssText = `display:inline-block;width:0;height:0;vertical-align:baseline;`;
+    probe.appendChild(document.createTextNode("Mg"));
+    probe.appendChild(baselineSpan);
+    document.body.appendChild(probe);
+    const probeRect = probe.getBoundingClientRect();
+    const spanRect = baselineSpan.getBoundingClientRect();
+    const lineHeight = probeRect.height;
+    const baseline = spanRect.top - probeRect.top;
+    document.body.removeChild(probe);
+    const m = { lineHeight, baseline };
+    cssFontMetricsCache.set(key, m);
+    return m;
+  }
+
   function drawShapeText(ctx, el) {
     const bb = getBBox(el);
     const fs = el.fontSize || 16;
-    ctx.font = `${fs}px ${fontCSS(el.fontFamily)}`;
+    const ff = el.fontFamily || "sans-serif";
+    ctx.font = `${fs}px ${fontCSS(ff)}`;
     ctx.fillStyle = el.strokeColor || "#1e1e2e";
-    ctx.textBaseline = "middle";
+    ctx.textBaseline = "alphabetic";
     const align = el.textAlign || "center";
     ctx.textAlign = align;
     ctx.setLineDash([]);
     const lines = el.text.split("\n");
-    const lineHeight = fs * 1.3;
+    const cssM = getCssFontMetrics(ff, fs);
+    const lineHeight = cssM.lineHeight;
     const totalH = lines.length * lineHeight;
-    const startY = bb.y + bb.h / 2 - totalH / 2 + lineHeight / 2;
+    const lineBoxTop = bb.y + bb.h / 2 - totalH / 2;
+    const baseline0 = lineBoxTop + cssM.baseline;
     lines.forEach((line, i) => {
       let tx = bb.x + bb.w / 2;
       if (align === "left") tx = bb.x + 8;
       else if (align === "right") tx = bb.x + bb.w - 8;
-      ctx.fillText(line, tx, startY + i * lineHeight);
+      ctx.fillText(line, tx, baseline0 + i * lineHeight);
     });
     ctx.textAlign = "start";
-    ctx.textBaseline = "alphabetic";
+  }
+
+  // Hachure fill: draw parallel diagonal lines across the shape, clipped to
+  // the shape's path. `crosshatch` adds a second set of lines perpendicular.
+  function drawHachureLines(ctx, bb, angle, spacing) {
+    const cx = bb.x + bb.w / 2, cy = bb.y + bb.h / 2;
+    const diag = Math.hypot(bb.w, bb.h) + spacing;
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    for (let d = -diag; d <= diag; d += spacing) {
+      const px = cx - sin * d;
+      const py = cy + cos * d;
+      ctx.beginPath();
+      ctx.moveTo(px - cos * diag, py - sin * diag);
+      ctx.lineTo(px + cos * diag, py + sin * diag);
+      ctx.stroke();
+    }
+  }
+  function fillPatternedPath(ctx, pathFn, bb, fillColor, style) {
+    if (!fillColor || fillColor === "transparent") return;
+    ctx.save();
+    ctx.beginPath();
+    pathFn(ctx);
+    if (style === "solid") {
+      ctx.fillStyle = fillColor;
+      ctx.fill();
+    } else {
+      ctx.clip();
+      ctx.strokeStyle = fillColor;
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([]);
+      ctx.lineCap = "round";
+      drawHachureLines(ctx, bb, -Math.PI / 4, 8);
+      if (style === "cross-hatch") {
+        drawHachureLines(ctx, bb, Math.PI / 4, 8);
+      }
+    }
+    ctx.restore();
   }
 
   function drawRect(ctx, el) {
@@ -1010,13 +1204,8 @@
     const rn = el.roundness || "sharp";
     const radius = rn === "round" ? Math.min(Math.abs(w), Math.abs(h)) * 0.15 : 0;
 
-    // Fill (always clean path)
-    if (el.fillColor && el.fillColor !== "transparent") {
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, h, radius);
-      ctx.fillStyle = el.fillColor;
-      ctx.fill();
-    }
+    const bb = { x: Math.min(x, x+w), y: Math.min(y, y+h), w: Math.abs(w), h: Math.abs(h) };
+    fillPatternedPath(ctx, (c) => c.roundRect(x, y, w, h, radius), bb, el.fillColor, el.fillStyle || "hachure");
 
     if (r === 0) {
       // Clean stroke
@@ -1045,17 +1234,10 @@
     const r = el.roughness ?? 0;
     const cx = x + w / 2, cy = y + h / 2;
 
-    // Fill (always clean path)
-    if (el.fillColor && el.fillColor !== "transparent") {
-      ctx.beginPath();
-      ctx.moveTo(cx, y);
-      ctx.lineTo(x + w, cy);
-      ctx.lineTo(cx, y + h);
-      ctx.lineTo(x, cy);
-      ctx.closePath();
-      ctx.fillStyle = el.fillColor;
-      ctx.fill();
-    }
+    const bb = { x: Math.min(x, x+w), y: Math.min(y, y+h), w: Math.abs(w), h: Math.abs(h) };
+    fillPatternedPath(ctx, (c) => {
+      c.moveTo(cx, y); c.lineTo(x + w, cy); c.lineTo(cx, y + h); c.lineTo(x, cy); c.closePath();
+    }, bb, el.fillColor, el.fillStyle || "hachure");
 
     if (r === 0) {
       ctx.beginPath();
@@ -1084,13 +1266,8 @@
     const rx = Math.abs(el.w / 2), ry = Math.abs(el.h / 2);
     const r = el.roughness ?? 0;
 
-    // Fill (always clean path)
-    if (el.fillColor && el.fillColor !== "transparent") {
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-      ctx.fillStyle = el.fillColor;
-      ctx.fill();
-    }
+    const bb = { x: cx - rx, y: cy - ry, w: rx * 2, h: ry * 2 };
+    fillPatternedPath(ctx, (c) => c.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2), bb, el.fillColor, el.fillStyle || "hachure");
 
     if (r === 0) {
       ctx.beginPath();
@@ -1107,8 +1284,61 @@
     }
   }
 
+  // ── Line curve helpers ───────────────────────────────────────────────
+  // Lines/arrows become curved when `el.cp` (control point) is set.
+  // Rendered as a quadratic bezier from start → cp → end.
+  function lineStartEnd(el) {
+    if (el.pts && el.pts.length > 1) {
+      return { s: { x: el.pts[0].x, y: el.pts[0].y }, e: { x: el.pts[el.pts.length - 1].x, y: el.pts[el.pts.length - 1].y } };
+    }
+    return { s: { x: el.x, y: el.y }, e: { x: el.x2, y: el.y2 } };
+  }
+  function lineMidHandlePos(el) {
+    if (el.cp) return { x: el.cp.x, y: el.cp.y };
+    const { s, e } = lineStartEnd(el);
+    return { x: (s.x + e.x) / 2, y: (s.y + e.y) / 2 };
+  }
+  function bezierPoint(t, p0, p1, p2) {
+    const mt = 1 - t;
+    return {
+      x: mt * mt * p0.x + 2 * mt * t * p1.x + t * t * p2.x,
+      y: mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2.y,
+    };
+  }
+  function sampleBezier(p0, p1, p2, steps) {
+    const out = [p0];
+    for (let i = 1; i <= steps; i++) out.push(bezierPoint(i / steps, p0, p1, p2));
+    return out;
+  }
+  function strokeCurvedLine(ctx, el, p0, p2) {
+    const r = el.roughness ?? 0;
+    const p1 = el.cp;
+    if (r === 0) {
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.quadraticCurveTo(p1.x, p1.y, p2.x, p2.y);
+      ctx.stroke();
+      return;
+    }
+    // Sample the curve into short segments and draw them as rough lines.
+    const pts = sampleBezier(p0, p1, p2, 12);
+    const seed = hashCode(el.id);
+    for (let pass = 0; pass < 2; pass++) {
+      const rng = seededRandom(seed + pass * 1000);
+      ctx.beginPath();
+      for (let i = 1; i < pts.length; i++) roughLine(ctx, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y, r, rng);
+      ctx.stroke();
+    }
+  }
+
   function drawLine(ctx, el) {
     const r = el.roughness ?? 0;
+    // Curved line (has control point)
+    if (el.cp) {
+      const { s, e } = lineStartEnd(el);
+      strokeCurvedLine(ctx, el, s, e);
+      return;
+    }
     if (el.pts && el.pts.length > 1) {
       if (r === 0) {
         ctx.beginPath();
@@ -1145,6 +1375,29 @@
   function drawArrow(ctx, el) {
     const r = el.roughness ?? 0;
     let endX, endY, prevX, prevY;
+
+    // Curved arrow: quadratic bezier with tangent-based arrowhead.
+    if (el.cp) {
+      const { s, e } = lineStartEnd(el);
+      strokeCurvedLine(ctx, el, s, e);
+      endX = e.x; endY = e.y;
+      // Tangent at t=1 points from cp → end.
+      prevX = el.cp.x; prevY = el.cp.y;
+      const adx = endX - prevX, ady = endY - prevY;
+      const alen = Math.hypot(adx, ady);
+      if (alen < 1) return;
+      const ux = adx / alen, uy = ady / alen;
+      const hw = 10, hl = 18;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(endX, endY);
+      ctx.lineTo(endX - hl * ux + hw * uy, endY - hl * uy - hw * ux);
+      ctx.lineTo(endX - hl * ux - hw * uy, endY - hl * uy + hw * ux);
+      ctx.closePath();
+      ctx.fillStyle = el.strokeColor || "#1e1e2e";
+      ctx.fill();
+      return;
+    }
 
     if (el.pts && el.pts.length > 1) {
       // Multi-point arrow
@@ -1289,25 +1542,8 @@
       ctx.stroke();
     }
 
-    if (isLine) {
-      // Endpoint handles for lines/arrows
-      ctx.restore(); // un-rotate for accurate world positions
-      ctx.save();
-      ctx.globalAlpha = 1;
-      const ep = getLineEndpoints(el);
-      drawHandle(ep.start.x, ep.start.y);
-      drawHandle(ep.end.x, ep.end.y);
-    } else {
-      // Corner resize handles for shapes
-      const corners = [
-        [bb.x - pad, bb.y - pad],
-        [bb.x + bb.w + pad, bb.y - pad],
-        [bb.x - pad, bb.y + bb.h + pad],
-        [bb.x + bb.w + pad, bb.y + bb.h + pad],
-      ];
-      corners.forEach(([hx, hy]) => drawHandle(hx, hy));
-
-      // Rotation handle — stem line from top-center to handle
+    // Rotation handle — stem line from top-center to handle (all elements).
+    {
       const handleDist = ROTATE_HANDLE_DIST / vp.scale;
       const stemX = bb.x + bb.w / 2;
       const stemTopY = bb.y - pad;
@@ -1327,14 +1563,34 @@
       ctx.strokeStyle = "#3b82f6";
       ctx.lineWidth = 1.5 / vp.scale;
       ctx.stroke();
+    }
 
-      ctx.fillStyle = "#3b82f6";
-      ctx.font = `${9 / vp.scale}px sans-serif`;
-      ctx.textBaseline = "middle";
-      ctx.textAlign = "center";
-      ctx.fillText("\u21BB", stemX, handleY);
-      ctx.textAlign = "start";
-      ctx.textBaseline = "alphabetic";
+    if (isLine) {
+      // Endpoint handles drawn in world coords (not rotated) to match existing hit-testing.
+      ctx.restore(); // un-rotate for accurate world positions
+      ctx.save();
+      ctx.globalAlpha = 1;
+      const ep = getLineEndpoints(el);
+      drawHandle(ep.start.x, ep.start.y);
+      drawHandle(ep.end.x, ep.end.y);
+      // Mid handle — draggable control point for curving the line.
+      const mh = lineMidHandlePos(el);
+      ctx.beginPath();
+      ctx.arc(mh.x, mh.y, 5 / vp.scale, 0, Math.PI * 2);
+      ctx.fillStyle = el.cp ? "#c7d2fe" : "#e0e7ff";
+      ctx.fill();
+      ctx.strokeStyle = "#3b82f6";
+      ctx.lineWidth = 1.5 / vp.scale;
+      ctx.stroke();
+    } else {
+      // Corner resize handles for shapes
+      const corners = [
+        [bb.x - pad, bb.y - pad],
+        [bb.x + bb.w + pad, bb.y - pad],
+        [bb.x - pad, bb.y + bb.h + pad],
+        [bb.x + bb.w + pad, bb.y + bb.h + pad],
+      ];
+      corners.forEach(([hx, hy]) => drawHandle(hx, hy));
     }
 
     ctx.restore();
@@ -1376,7 +1632,7 @@
     return { start: { x: el.x, y: el.y }, end: { x: el.x2, y: el.y2 } };
   }
 
-  const HANDLE_CURSORS = { nw: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", se: "nwse-resize", start: "crosshair", end: "crosshair" };
+  const HANDLE_CURSORS = { nw: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", se: "nwse-resize", start: "crosshair", end: "crosshair", mid: "move" };
 
   function hitTestHandles(el, wx, wy) {
     const threshold = 8 / vp.scale;
@@ -1384,6 +1640,8 @@
       const ep = getLineEndpoints(el);
       if (Math.hypot(wx - ep.start.x, wy - ep.start.y) < threshold) return "start";
       if (Math.hypot(wx - ep.end.x, wy - ep.end.y) < threshold) return "end";
+      const mh = lineMidHandlePos(el);
+      if (Math.hypot(wx - mh.x, wy - mh.y) < threshold) return "mid";
       return null;
     }
     const handles = getResizeHandles(el);
@@ -1403,13 +1661,15 @@
         return { x: el.x, y: el.y, w: el.w || 0, h: el.h || 0 };
       case "line":
       case "arrow": {
+        let xs, ys;
         if (el.pts && el.pts.length > 1) {
-          const xs = el.pts.map(p => p.x), ys = el.pts.map(p => p.y);
-          const mx = Math.min(...xs), my = Math.min(...ys);
-          return { x: mx, y: my, w: Math.max(...xs) - mx, h: Math.max(...ys) - my };
+          xs = el.pts.map(p => p.x); ys = el.pts.map(p => p.y);
+        } else {
+          xs = [el.x, el.x2]; ys = [el.y, el.y2];
         }
-        const x = Math.min(el.x, el.x2), y = Math.min(el.y, el.y2);
-        return { x, y, w: Math.abs(el.x2 - el.x), h: Math.abs(el.y2 - el.y) };
+        if (el.cp) { xs = xs.concat([el.cp.x]); ys = ys.concat([el.cp.y]); }
+        const mx = Math.min(...xs), my = Math.min(...ys);
+        return { x: mx, y: my, w: Math.max(...xs) - mx, h: Math.max(...ys) - my };
       }
       case "pencil": {
         if (!el.pts || !el.pts.length) return { x: 0, y: 0, w: 0, h: 0 };
@@ -1456,6 +1716,14 @@
       }
       case "line":
       case "arrow": {
+        if (el.cp) {
+          const { s, e } = lineStartEnd(el);
+          const samples = sampleBezier(s, el.cp, e, 16);
+          for (let i = 1; i < samples.length; i++) {
+            if (distToSegment(wx, wy, samples[i-1].x, samples[i-1].y, samples[i].x, samples[i].y) < pad + el.strokeWidth) return true;
+          }
+          return false;
+        }
         if (el.pts && el.pts.length > 1) {
           for (let i = 1; i < el.pts.length; i++) {
             if (distToSegment(wx, wy, el.pts[i-1].x, el.pts[i-1].y, el.pts[i].x, el.pts[i].y) < pad + el.strokeWidth) return true;
@@ -1735,6 +2003,17 @@
           } else if (resizeHandle === "end") {
             if (sel.pts && sel.pts.length > 1) { sel.pts[sel.pts.length - 1] = { x: wx, y: wy }; }
             else { sel.x2 = wx; sel.y2 = wy; }
+          } else if (resizeHandle === "mid") {
+            // Drag midpoint to curve the line. Snap back to straight if dragged
+            // onto the chord.
+            const { s, e: ee } = lineStartEnd(sel);
+            const mx = (s.x + ee.x) / 2, my = (s.y + ee.y) / 2;
+            const snap = 3 / vp.scale;
+            if (Math.hypot(wx - mx, wy - my) < snap) {
+              delete sel.cp;
+            } else {
+              sel.cp = { x: wx, y: wy };
+            }
           }
         } else {
           // Shape corner resize
@@ -1826,7 +2105,13 @@
       if (!tooSmall) {
         snapshot();
         scene.elements.push(currentEl);
-        selectedIds = new Set([currentEl.id]);
+        const newId = currentEl.id;
+        // Auto-switch back to select tool after drawing a shape (Excalidraw-style).
+        // Pencil stays in pencil so the user can keep free-drawing.
+        if (activeTool !== "pencil" && activeTool !== "eraser" && activeTool !== "text") {
+          setTool("select");
+        }
+        selectedIds = new Set([newId]);
       }
       currentEl = null;
     }
@@ -1864,6 +2149,8 @@
     if (e.key === "0") setTool("select"); // 0 = quick back to select
     if (e.key === "Escape") { commitTextInput(); selectedIds.clear(); render(); }
     if (e.key === "F11") { e.preventDefault(); toggleFullscreen(); }
+    if (e.key === "[") { e.preventDefault(); toggleSidebar(); }
+    if (e.altKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); toggleZenMode(); }
   }
 
   window.addEventListener("keyup", e => {
@@ -1997,6 +2284,7 @@
       case "fillColor": fillColor = value; break;
       case "strokeWidth": strokeWidth = value; break;
       case "strokeStyle": strokeStyle = value; break;
+      case "fillStyle": fillStyle = value; break;
       case "roughness": roughness = value; break;
       case "roundness": roundness = value; break;
       case "opacity": opacity = value; break;
@@ -2029,6 +2317,7 @@
     const fc = sel ? (sel.fillColor || "transparent") : fillColor;
     const sw = sel ? (sel.strokeWidth || 2) : strokeWidth;
     const ss = sel ? (sel.strokeStyle || "solid") : strokeStyle;
+    const fls = sel ? (sel.fillStyle || "hachure") : fillStyle;
     const rg = sel ? (sel.roughness ?? 0) : roughness;
     const rn = sel ? (sel.roundness || "sharp") : roundness;
     const op = sel ? (sel.opacity ?? 100) : opacity;
@@ -2057,6 +2346,11 @@
     // Stroke style
     sb.querySelectorAll("#ss-btns .sb-btn").forEach(b => {
       b.classList.toggle("active", b.dataset.val === ss);
+    });
+
+    // Fill style
+    sb.querySelectorAll("#fs-fill-btns .sb-btn").forEach(b => {
+      b.classList.toggle("active", b.dataset.val === fls);
     });
 
     // Roughness
@@ -2383,6 +2677,7 @@
       type: activeTool,
       strokeColor,
       fillColor,
+      fillStyle,
       strokeWidth,
       strokeStyle,
       roughness,
@@ -2428,6 +2723,7 @@
       case "line": case "arrow":
         if (el.pts) { el.pts = el.pts.map(p => ({ x: p.x + dx, y: p.y + dy })); }
         else { el.x += dx; el.y += dy; el.x2 += dx; el.y2 += dy; }
+        if (el.cp) { el.cp = { x: el.cp.x + dx, y: el.cp.y + dy }; }
         break;
       case "pencil":
         el.pts = el.pts.map(p => ({ x: p.x + dx, y: p.y + dy })); break;
@@ -2451,13 +2747,16 @@
     textInput = document.createElement("textarea");
     textInput.style.cssText = `
       position:absolute; left:${sx}px; top:${sy}px;
-      min-width:80px; min-height:${fontSize * 1.4}px;
+      margin:0; padding:0; border:none; outline:none; resize:none;
+      background:transparent; overflow:hidden;
+      min-width:1ch; min-height:${fontSize * vp.scale * 1.3}px;
       font-size:${fontSize * vp.scale}px;
       font-family:${fontCSS(fontFamily)};
-      color:${strokeColor}; background:transparent;
-      border:1.5px dashed #3b82f6; outline:none; resize:none;
-      padding:2px 4px; border-radius:3px;
+      color:${strokeColor};
       line-height:1.3; z-index:10;
+      white-space:pre; word-break:keep-all;
+      box-shadow:0 0 0 1.5px #3b82f6;
+      border-radius:2px;
     `;
     textInput.dataset.wx = wx;
     textInput.dataset.wy = wy;
@@ -2484,12 +2783,16 @@
     textInput.value = el.text || "";
     textInput.style.cssText = `
       position:absolute; left:${sx}px; top:${sy}px;
-      min-width:80px; min-height:${(el.fontSize || 16) * 1.4}px;
+      margin:0; padding:0; border:none; outline:none; resize:none;
+      background:transparent; overflow:hidden;
+      min-width:1ch; min-height:${(el.fontSize || 16) * vp.scale * 1.3}px;
       font-size:${(el.fontSize || 16) * vp.scale}px;
       font-family:${fontCSS(el.fontFamily)};
-      color:${el.strokeColor || strokeColor}; background:transparent;
-      border:1.5px dashed #3b82f6; outline:none; resize:none;
-      padding:2px 4px; border-radius:3px; line-height:1.3; z-index:10;
+      color:${el.strokeColor || strokeColor};
+      line-height:1.3; z-index:10;
+      white-space:pre; word-break:keep-all;
+      box-shadow:0 0 0 1.5px #3b82f6;
+      border-radius:2px;
     `;
     textInput.dataset.wx = el.x;
     textInput.dataset.wy = el.y;
@@ -2505,29 +2808,40 @@
   }
 
   function startTextInputOnShape(el) {
-    // Edit text label inside a shape (rect, ellipse, etc.)
-    // Hide the shape's text while editing to avoid double rendering
+    // Edit text label inside a shape. We keep the canvas rendering the live
+    // text and overlay a transparent textarea so what the user sees IS the
+    // final render (Excalidraw style — no visual shift on commit).
     el._savedText = el.text || "";
-    el.text = "";
+    el._editing = true;
+    el.text = el._savedText;
     render();
     const bb = getBBox(el);
-    const cx = (bb.x + bb.w / 2) * vp.scale + vp.x;
-    const cy = (bb.y + bb.h / 2) * vp.scale + vp.y;
     const wrap = canvas.parentElement;
     const fs = el.fontSize || fontSize;
+    const ff = el.fontFamily || fontFamily;
+    const cssM = getCssFontMetrics(ff, fs);
+    const lineHeight = cssM.lineHeight;
+    // Align the textarea so its first-line baseline lines up with the canvas
+    // baseline we draw from in drawShapeText.
+    const canvasBaselineWorld = bb.y + bb.h / 2 - lineHeight / 2 + cssM.baseline;
+    const canvasBaselineScreen = canvasBaselineWorld * vp.scale + vp.y;
+    const taTop = canvasBaselineScreen - cssM.baseline * vp.scale;
+    const taLeft = (bb.x + bb.w / 2) * vp.scale + vp.x;
     textInput = document.createElement("textarea");
     textInput.value = el._savedText;
     textInput.style.cssText = `
-      position:absolute; left:${cx}px; top:${cy}px;
-      transform:translate(-50%, -50%);
-      min-width:60px; min-height:${fs * 1.4}px;
-      max-width:${Math.max(80, Math.abs(bb.w) * vp.scale - 16)}px;
+      position:absolute; left:${taLeft}px; top:${taTop}px;
+      transform:translateX(-50%);
+      margin:0; padding:0; border:none; outline:none; resize:none;
+      background:transparent; overflow:hidden;
+      min-width:1ch; height:${lineHeight * vp.scale}px;
+      max-width:${Math.max(60, Math.abs(bb.w) * vp.scale - 16)}px;
       font-size:${fs * vp.scale}px;
-      font-family:${fontCSS(el.fontFamily)};
-      color:${el.strokeColor || strokeColor}; background:transparent;
-      border:1.5px dashed #3b82f6; outline:none; resize:none;
-      padding:2px 4px; border-radius:3px; line-height:1.3;
-      text-align:center; z-index:10;
+      font-family:${fontCSS(ff)};
+      color:transparent; caret-color:${el.strokeColor || strokeColor};
+      line-height:1.3; text-align:center; z-index:10;
+      white-space:pre; word-break:keep-all;
+      vertical-align:top; box-sizing:content-box;
     `;
     textInput.dataset.wx = bb.x + bb.w / 2;
     textInput.dataset.wy = bb.y + bb.h / 2;
@@ -2537,6 +2851,13 @@
     requestAnimationFrame(() => textInput && textInput.focus());
     textInput.addEventListener("keydown", e => { if (e.key === "Escape") commitTextInput(); });
     textInput.addEventListener("blur", () => commitTextInput());
+    textInput.addEventListener("input", () => {
+      el.text = textInput.value;
+      // Grow textarea vertically as lines are added.
+      const newLineCount = (textInput.value.match(/\n/g) || []).length + 1;
+      textInput.style.height = (lineHeight * vp.scale * newLineCount) + "px";
+      render();
+    });
   }
 
   function commitTextInput() {
@@ -2559,6 +2880,7 @@
         shape.fontSize = fs;
         shape.fontFamily = shape.fontFamily || fontFamily;
         delete shape._savedText;
+        delete shape._editing;
       }
       render();
       return;
