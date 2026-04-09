@@ -1916,69 +1916,126 @@
   }
 
   // ── Events ────────────────────────────────────────────────────────────────
-  // Input routing:
-  //   • Mouse      → onMouseDown/Move/Up (direct)
-  //   • Pen/stylus → onMouseDown/Move/Up via pointer events (Apple Pencil,
-  //                  Surface pen, etc.). Runs in both edit and view modes
-  //                  so the pencil can draw, select, and pan.
-  //   • Touch      → onTouchStart/Move/End (1-finger pan, 2-finger zoom)
-  //
-  // `touch-action: none` on the canvas stops the browser from stealing
-  // pinch/scroll gestures before we see them.
+  // All pointer input (mouse, pen, touch) flows through a single pointer-
+  // event pipeline à la Excalidraw. We still keep the mouse handlers around
+  // for the existing code path — the pointer handlers call them directly.
+  // Separate wheel/dblclick listeners remain for mouse-specific gestures.
+  // The legacy touch listeners only run if PointerEvent is unavailable.
   function attachCanvasEvents() {
-    canvas.addEventListener("mousedown", onMouseDown);
-    canvas.addEventListener("mousemove", onMouseMove);
-    canvas.addEventListener("mouseup", onMouseUp);
-    canvas.addEventListener("mouseleave", onMouseUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("dblclick", onDblClick);
 
-    // Pointer events — handles stylus/pen (Apple Pencil included).
-    canvas.addEventListener("pointerdown", onPointerDown);
-    canvas.addEventListener("pointermove", onPointerMove);
-    canvas.addEventListener("pointerup", onPointerUp);
-    canvas.addEventListener("pointercancel", onPointerUp);
-
-    // Touch support (fingers): pan + pinch-zoom.
-    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
-    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
-    canvas.addEventListener("touchend", onTouchEnd);
+    if (typeof window.PointerEvent === "function") {
+      canvas.addEventListener("pointerdown", onPointerDown);
+      canvas.addEventListener("pointermove", onPointerMove);
+      canvas.addEventListener("pointerup", onPointerUp);
+      canvas.addEventListener("pointercancel", onPointerUp);
+    } else {
+      // Legacy fallback for browsers without PointerEvent.
+      canvas.addEventListener("mousedown", onMouseDown);
+      canvas.addEventListener("mousemove", onMouseMove);
+      canvas.addEventListener("mouseup", onMouseUp);
+      canvas.addEventListener("mouseleave", onMouseUp);
+      canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+      canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+      canvas.addEventListener("touchend", onTouchEnd);
+    }
   }
 
-  // Pen pointers (Apple Pencil, Surface pen, stylus): route through the
-  // mouse handlers so the user can draw, select, and pan exactly like a
-  // mouse. Mouse and finger pointers are left to their native handlers.
-  let pencilActive = false;
+  // Active pointers are tracked so we can detect single- vs multi-pointer
+  // gestures. `primaryPointerId` is the id the tool is currently following.
+  const activePointers = new Map(); // pointerId → { x, y, type }
+  let primaryPointerId = null;
+  let twoPointerGesture = null;     // { cx, cy, dist }
+
   function synthMouseEvent(pe) {
     return {
-      button: 0,
+      button: pe.button != null ? pe.button : 0,
       clientX: pe.clientX,
       clientY: pe.clientY,
-      shiftKey: pe.shiftKey,
-      ctrlKey: pe.ctrlKey,
-      metaKey: pe.metaKey,
-      altKey: pe.altKey,
-      preventDefault: () => pe.preventDefault(),
-      stopPropagation: () => pe.stopPropagation(),
+      shiftKey: !!pe.shiftKey,
+      ctrlKey: !!pe.ctrlKey,
+      metaKey: !!pe.metaKey,
+      altKey: !!pe.altKey,
+      preventDefault: () => { if (pe.preventDefault) pe.preventDefault(); },
+      stopPropagation: () => { if (pe.stopPropagation) pe.stopPropagation(); },
     };
   }
+
   function onPointerDown(e) {
-    if (e.pointerType !== "pen") return;
+    // Let non-primary mouse buttons (e.g. right-click) fall through.
+    if (e.pointerType === "mouse" && e.button !== 0 && e.button !== 1) return;
     e.preventDefault();
-    pencilActive = true;
-    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
-    onMouseDown(synthMouseEvent(e));
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
+
+    if (activePointers.size === 1) {
+      primaryPointerId = e.pointerId;
+      try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+      onMouseDown(synthMouseEvent(e));
+      return;
+    }
+
+    if (activePointers.size === 2) {
+      // Cancel any in-progress single-pointer action so the second pointer
+      // can initiate pan/pinch cleanly.
+      if (primaryPointerId != null) {
+        onMouseUp(synthMouseEvent(e));
+        primaryPointerId = null;
+      }
+      const pts = [...activePointers.values()];
+      twoPointerGesture = {
+        cx: (pts[0].x + pts[1].x) / 2,
+        cy: (pts[0].y + pts[1].y) / 2,
+        dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
+      };
+    }
   }
+
   function onPointerMove(e) {
-    if (e.pointerType !== "pen" || !pencilActive) return;
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY, type: e.pointerType });
     e.preventDefault();
-    onMouseMove(synthMouseEvent(e));
+
+    if (activePointers.size === 1 && e.pointerId === primaryPointerId) {
+      onMouseMove(synthMouseEvent(e));
+      return;
+    }
+
+    if (activePointers.size >= 2 && twoPointerGesture) {
+      const pts = [...activePointers.values()];
+      const cx = (pts[0].x + pts[1].x) / 2;
+      const cy = (pts[0].y + pts[1].y) / 2;
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      // Pan by centroid delta.
+      vp.x += cx - twoPointerGesture.cx;
+      vp.y += cy - twoPointerGesture.cy;
+      // Pinch-zoom around centroid.
+      if (twoPointerGesture.dist > 0) {
+        const factor = dist / twoPointerGesture.dist;
+        const rect = canvas.getBoundingClientRect();
+        const px = cx - rect.left, py = cy - rect.top;
+        const newScale = Math.max(0.1, Math.min(10, vp.scale * factor));
+        vp.x = px - (px - vp.x) * (newScale / vp.scale);
+        vp.y = py - (py - vp.y) * (newScale / vp.scale);
+        vp.scale = newScale;
+      }
+      twoPointerGesture = { cx, cy, dist };
+      render();
+    }
   }
+
   function onPointerUp(e) {
-    if (e.pointerType !== "pen" || !pencilActive) return;
-    e.preventDefault();
-    pencilActive = false;
-    onMouseUp(synthMouseEvent(e));
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.delete(e.pointerId);
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+
+    if (e.pointerId === primaryPointerId) {
+      onMouseUp(synthMouseEvent(e));
+      primaryPointerId = null;
+    }
+    if (activePointers.size < 2) {
+      twoPointerGesture = null;
+    }
   }
 
   function onMouseDown(e) {
