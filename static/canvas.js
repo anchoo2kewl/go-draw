@@ -823,7 +823,7 @@
 
       /* Canvas wrap */
       #canvas-wrap { flex:1; position:relative; overflow:hidden; background:#f4f4f5; }
-      #canvas { display:block; cursor:crosshair; }
+      #canvas { display:block; cursor:crosshair; touch-action:none; }
 
       /* Floating action bar */
       #godraw-fab { position:absolute; bottom:12px; right:12px; display:flex; gap:6px; z-index:20; }
@@ -1916,6 +1916,15 @@
   }
 
   // ── Events ────────────────────────────────────────────────────────────────
+  // Input routing:
+  //   • Mouse      → onMouseDown/Move/Up (direct)
+  //   • Pen/stylus → onMouseDown/Move/Up via pointer events (Apple Pencil,
+  //                  Surface pen, etc.). Runs in both edit and view modes
+  //                  so the pencil can draw, select, and pan.
+  //   • Touch      → onTouchStart/Move/End (1-finger pan, 2-finger zoom)
+  //
+  // `touch-action: none` on the canvas stops the browser from stealing
+  // pinch/scroll gestures before we see them.
   function attachCanvasEvents() {
     canvas.addEventListener("mousedown", onMouseDown);
     canvas.addEventListener("mousemove", onMouseMove);
@@ -1923,10 +1932,53 @@
     canvas.addEventListener("mouseleave", onMouseUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("dblclick", onDblClick);
-    // Touch support
+
+    // Pointer events — handles stylus/pen (Apple Pencil included).
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerUp);
+
+    // Touch support (fingers): pan + pinch-zoom.
     canvas.addEventListener("touchstart", onTouchStart, { passive: false });
     canvas.addEventListener("touchmove", onTouchMove, { passive: false });
     canvas.addEventListener("touchend", onTouchEnd);
+  }
+
+  // Pen pointers (Apple Pencil, Surface pen, stylus): route through the
+  // mouse handlers so the user can draw, select, and pan exactly like a
+  // mouse. Mouse and finger pointers are left to their native handlers.
+  let pencilActive = false;
+  function synthMouseEvent(pe) {
+    return {
+      button: 0,
+      clientX: pe.clientX,
+      clientY: pe.clientY,
+      shiftKey: pe.shiftKey,
+      ctrlKey: pe.ctrlKey,
+      metaKey: pe.metaKey,
+      altKey: pe.altKey,
+      preventDefault: () => pe.preventDefault(),
+      stopPropagation: () => pe.stopPropagation(),
+    };
+  }
+  function onPointerDown(e) {
+    if (e.pointerType !== "pen") return;
+    e.preventDefault();
+    pencilActive = true;
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    onMouseDown(synthMouseEvent(e));
+  }
+  function onPointerMove(e) {
+    if (e.pointerType !== "pen" || !pencilActive) return;
+    e.preventDefault();
+    onMouseMove(synthMouseEvent(e));
+  }
+  function onPointerUp(e) {
+    if (e.pointerType !== "pen" || !pencilActive) return;
+    e.preventDefault();
+    pencilActive = false;
+    onMouseUp(synthMouseEvent(e));
   }
 
   function onMouseDown(e) {
@@ -2437,7 +2489,13 @@
   // Touch (single finger = pan, pinch = zoom)
   let lastTouchDist = 0;
   let lastTouches = null;
+  function isStylusTouch(e) {
+    // WebKit/iOS exposes Touch.touchType="stylus" for Apple Pencil.
+    return e.touches && e.touches[0] && e.touches[0].touchType === "stylus";
+  }
   function onTouchStart(e) {
+    // Let the pointer-event handler deal with stylus so we don't double-fire.
+    if (isStylusTouch(e)) return;
     e.preventDefault();
     if (e.touches.length === 1) {
       lastTouches = e.touches;
@@ -2452,6 +2510,7 @@
     }
   }
   function onTouchMove(e) {
+    if (isStylusTouch(e)) return;
     e.preventDefault();
     if (e.touches.length === 1 && panning) {
       vp.x = panStart.vpx + (e.touches[0].clientX - panStart.x);
@@ -3204,14 +3263,28 @@
     var contentH = maxY - minY;
     if (contentW < 1) contentW = 1;
     if (contentH < 1) contentH = 1;
-    var pad = 40;
+    var pad = 20;
     var scaleX = (canvas.width - pad * 2) / contentW;
     var scaleY = (canvas.height - pad * 2) / contentH;
-    vp.scale = Math.min(scaleX, scaleY, 2);
+    // On narrow canvases (mobile embeds) prioritise width-fit so text stays
+    // readable. The user can pan/pinch to see content that overflows
+    // vertically. Desktop still fits both dimensions.
+    var isNarrow = canvas.width < 600;
+    if (isNarrow) {
+      vp.scale = Math.min(scaleX, 3);
+    } else {
+      vp.scale = Math.min(scaleX, scaleY, 2);
+    }
     var cx = (minX + maxX) / 2;
     var cy = (minY + maxY) / 2;
     vp.x = canvas.width / 2 - cx * vp.scale;
-    vp.y = canvas.height / 2 - cy * vp.scale;
+    if (isNarrow) {
+      // Top-align content with some padding so the first row is visible
+      // without panning.
+      vp.y = pad - minY * vp.scale;
+    } else {
+      vp.y = canvas.height / 2 - cy * vp.scale;
+    }
   }
 
   // Center on content at a given scale
