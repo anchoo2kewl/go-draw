@@ -3475,6 +3475,48 @@
 
   // ── Share dialog ───────────────────────────────────────────────────────
   function openShareDialog() {
+    // When the canvas is running in local-storage mode (standalone root
+    // page), there is no server-side drawing id yet, so share/view/embed
+    // links wouldn't resolve. Offer a "Publish to share" flow that uploads
+    // the current scene to the server and redirects to the real edit URL.
+    if (CFG.storage === "local") {
+      const { overlay, modal } = openModal(`
+        <h3>Publish to share</h3>
+        <p style="font-size:.85rem;color:#666;margin:0 0 12px;">
+          This drawing lives only in your browser right now. Publish it to the
+          server to get a shareable link, a collaboration link, and an embed
+          code.
+        </p>
+        <div class="modal-actions">
+          <button class="modal-btn modal-btn-secondary" id="publish-cancel">Cancel</button>
+          <button class="modal-btn modal-btn-primary" id="publish-go">\uD83D\uDCE4 Publish &amp; share</button>
+        </div>
+      `);
+      modal.querySelector("#publish-cancel").addEventListener("click", () => closeModal(overlay));
+      modal.querySelector("#publish-go").addEventListener("click", async () => {
+        const btn = modal.querySelector("#publish-go");
+        btn.disabled = true;
+        btn.textContent = "Publishing\u2026";
+        try {
+          const res = await fetch(`${CFG.basePath}/api/new`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: title || "Untitled", scene }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+          const data = await res.json();
+          // Navigate to the real edit URL; collab + share + embed all work
+          // from /draw/{id}/edit.
+          window.location.href = data.edit_url;
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = "\uD83D\uDCE4 Publish & share";
+          alert("Failed to publish: " + err.message);
+        }
+      });
+      return;
+    }
+
     const origin = window.location.origin;
     const viewUrl = `${origin}${CFG.basePath}/${CFG.id}`;
     const editUrl = `${origin}${CFG.basePath}/${CFG.id}/edit`;
@@ -3492,9 +3534,17 @@
             <button class="modal-btn modal-btn-primary share-copy-btn" data-target="share-view-url">Copy</button>
           </div>
         </div>
+        <div>
+          <label style="font-size:.75rem;color:#888;display:block;margin-bottom:4px;">Edit link (anyone with this link can edit)</label>
+          <div style="display:flex;gap:6px;">
+            <input type="text" id="share-edit-url" value="${escHtml(editUrl)}" readonly
+              style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;background:#f8f8f8;" />
+            <button class="modal-btn modal-btn-primary share-copy-btn" data-target="share-edit-url">Copy</button>
+          </div>
+        </div>
         ${CFG.collabEnabled ? `
         <div>
-          <label style="font-size:.75rem;color:#888;display:block;margin-bottom:4px;">Collaborate link (with encryption key)</label>
+          <label style="font-size:.75rem;color:#888;display:block;margin-bottom:4px;">Collaborate link (real-time, with encryption key)</label>
           <div style="display:flex;gap:6px;">
             <input type="text" id="share-collab-url" value="${escHtml(collabUrl)}" readonly
               style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:.85rem;background:#f8f8f8;" />
