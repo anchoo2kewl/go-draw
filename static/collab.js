@@ -22,7 +22,7 @@
   // ── State ───────────────────────────────────────────────────────────────
   let ws = null;
   let myPeerId = "";
-  let myName = localStorage.getItem("godraw-collab-name") || "Anonymous";
+  let myName = localStorage.getItem("godraw-collab-name") || "";
   let cryptoKey = null;
   let peers = new Map(); // id -> { name, color, cursor: {x, y} }
   let lastCursorSend = 0;
@@ -251,16 +251,26 @@
       if (wrap) wrap.appendChild(bar);
     }
     bar.innerHTML = "";
-    // My pill
-    bar.appendChild(makePill("You", peerColor(myPeerId)));
+    // My pill — clickable to change name.
+    const myLabel = (myName ? myName + " (you)" : "You");
+    const mePill = makePill(myLabel, peerColor(myPeerId), true);
+    mePill.title = "Click to change your name";
+    mePill.addEventListener("click", async () => {
+      await promptForName();
+      updatePresenceBar();
+      // Reconnect so peers see the new name on the WebSocket query string.
+      if (ws && ws.readyState <= 1) { try { ws.close(); } catch (_) {} ws = null; }
+      connect();
+    });
+    bar.appendChild(mePill);
     for (const [, p] of peers) {
-      bar.appendChild(makePill(p.name, p.color));
+      bar.appendChild(makePill(p.name, p.color, false));
     }
   }
 
-  function makePill(name, color) {
+  function makePill(name, color, clickable) {
     const pill = document.createElement("div");
-    pill.style.cssText = `display:flex;align-items:center;gap:4px;background:${color};color:#fff;padding:3px 8px;border-radius:12px;font-size:11px;font-family:sans-serif;box-shadow:0 1px 3px rgba(0,0,0,0.15);`;
+    pill.style.cssText = `display:flex;align-items:center;gap:4px;background:${color};color:#fff;padding:3px 8px;border-radius:12px;font-size:11px;font-family:sans-serif;box-shadow:0 1px 3px rgba(0,0,0,0.15);${clickable ? "cursor:pointer;" : ""}`;
     pill.textContent = name;
     return pill;
   }
@@ -284,11 +294,67 @@
     setName(name) {
       myName = name;
       localStorage.setItem("godraw-collab-name", name);
+      // If we already have a connection, drop and reconnect with the new name.
+      if (ws && ws.readyState <= 1) {
+        try { ws.close(); } catch (_) {}
+        ws = null;
+        connect();
+      }
     },
+    getName() { return myName; },
+    promptForName() { return promptForName(); },
     getPeers() { return peers; },
     isConnected() { return ws && ws.readyState === 1; },
   };
 
-  // Auto-connect if collab is enabled
-  connect();
+  // First-run name prompt — uses a small in-page modal so the user picks
+  // a display name before joining the collab session. The name is then
+  // persisted in localStorage and used for the WebSocket query string.
+  function promptForName() {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10000;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;";
+      const modal = document.createElement("div");
+      modal.style.cssText = "background:#fff;border-radius:12px;padding:24px;min-width:320px;max-width:90vw;box-shadow:0 12px 40px rgba(0,0,0,0.25);";
+      modal.innerHTML =
+        '<h3 style="margin:0 0 8px;font-size:1.05rem;color:#1e1e2e;">What\u2019s your name?</h3>' +
+        '<p style="margin:0 0 14px;font-size:.85rem;color:#666;line-height:1.4;">Other people in this drawing will see this name next to your cursor and changes.</p>' +
+        '<input id="godraw-name-input" type="text" placeholder="e.g. Alex" maxlength="40" ' +
+          'style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:.95rem;outline:none;box-sizing:border-box;" />' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
+          '<button id="godraw-name-save" style="background:#1e1e2e;color:#fff;border:none;border-radius:8px;padding:9px 18px;cursor:pointer;font-size:.9rem;font-weight:500;">Join</button>' +
+        '</div>';
+      // Dark host pages get a dark modal.
+      if (document.documentElement.classList.contains("dark") || document.documentElement.classList.contains("godraw-dark")) {
+        modal.style.background = "#1e1e2e";
+        modal.style.color = "#e0e0e0";
+        modal.querySelector("h3").style.color = "#e0e0e0";
+        modal.querySelector("p").style.color = "#aaa";
+        const input = modal.querySelector("#godraw-name-input");
+        input.style.background = "#2a2a3e"; input.style.color = "#e0e0e0"; input.style.borderColor = "#444";
+      }
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+      const input = modal.querySelector("#godraw-name-input");
+      input.value = myName || "";
+      setTimeout(() => input.focus(), 0);
+      function commit() {
+        const v = input.value.trim();
+        if (!v) { input.focus(); return; }
+        myName = v;
+        localStorage.setItem("godraw-collab-name", v);
+        document.body.removeChild(overlay);
+        resolve(v);
+      }
+      modal.querySelector("#godraw-name-save").addEventListener("click", commit);
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } });
+    });
+  }
+
+  // Auto-connect if collab is enabled. Prompt for name first if we don't
+  // have one yet so peers see a real name instead of "Anonymous".
+  (async function init() {
+    if (!myName) await promptForName();
+    connect();
+  })();
 })();
