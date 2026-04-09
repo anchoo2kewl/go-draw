@@ -21,15 +21,20 @@
   "use strict";
 
   const MIN_HEIGHT = 200;
-  const MIN_WIDTH = 300;
+  const MIN_WIDTH = 260;
+  // Mobile viewports get a shorter default embed height so the drawing fits
+  // neatly inline with the text instead of dwarfing surrounding paragraphs.
+  const isMobileViewport = typeof window !== "undefined" && window.innerWidth <= 640;
 
   function initEmbed(container) {
     const src = container.dataset.src;
     const width = container.dataset.width || "100%";
-    const height = container.dataset.height || "520px";
+    const defaultHeight = isMobileViewport ? "260px" : "520px";
+    const height = container.dataset.height || defaultHeight;
+    const effectiveMinW = isMobileViewport ? 0 : MIN_WIDTH;
 
     // Build wrapper
-    container.style.cssText = `position:relative;width:${width};height:${height};min-height:${MIN_HEIGHT}px;min-width:${MIN_WIDTH}px;`;
+    container.style.cssText = `position:relative;width:${width};height:${height};min-height:${MIN_HEIGHT}px;min-width:${effectiveMinW}px;`;
     container.classList.add("godraw-embed-initialized");
 
     // Iframe

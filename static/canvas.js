@@ -283,7 +283,21 @@
     ctx = canvas.getContext("2d");
     injectStyles();
     resizeCanvas();
-    window.addEventListener("resize", () => { resizeCanvas(); render(); });
+    // In view mode we auto-fit content to the canvas and keep re-fitting if
+    // the iframe/container is resized (common on responsive mobile layouts).
+    window.addEventListener("resize", () => {
+      resizeCanvas();
+      if (!IS_EDIT) zoomToFit();
+      render();
+    });
+    if (!IS_EDIT && typeof ResizeObserver === "function") {
+      const ro = new ResizeObserver(() => {
+        resizeCanvas();
+        zoomToFit();
+        render();
+      });
+      ro.observe(canvas.parentElement);
+    }
     attachCanvasEvents();
     if (IS_EDIT) {
       window.addEventListener("keydown", onKeyDown);
