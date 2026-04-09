@@ -2493,38 +2493,97 @@
     // WebKit/iOS exposes Touch.touchType="stylus" for Apple Pencil.
     return e.touches && e.touches[0] && e.touches[0].touchType === "stylus";
   }
+  // Excalidraw-style touch input:
+  //   • 1 finger → routes through the mouse handler so the active tool
+  //                (draw/select/erase/text) works identically to desktop.
+  //                Exception: the hand tool still pans.
+  //   • 2 fingers → pan + pinch-zoom, and cancels any in-progress single-
+  //                 finger draw.
+  //   • Apple Pencil / stylus → handled by the pointer-event path above,
+  //                             skipped here to avoid double-firing.
+  let touchDrawing = false;
+  let twoFingerActive = false;
+  let twoFingerLast = null;   // { cx, cy, dist }
+
+  function synthFromTouch(touch, e) {
+    return {
+      button: 0,
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+      shiftKey: e.shiftKey || false,
+      ctrlKey: e.ctrlKey || false,
+      metaKey: e.metaKey || false,
+      altKey: e.altKey || false,
+      preventDefault: () => e.preventDefault(),
+      stopPropagation: () => e.stopPropagation(),
+    };
+  }
+
   function onTouchStart(e) {
-    // Let the pointer-event handler deal with stylus so we don't double-fire.
     if (isStylusTouch(e)) return;
     e.preventDefault();
+
     if (e.touches.length === 1) {
-      lastTouches = e.touches;
-      panning = true;
-      panStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, vpx: vp.x, vpy: vp.y };
-    } else if (e.touches.length === 2) {
-      panning = false;
-      lastTouchDist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
+      // Hand tool always pans; everything else uses the mouse handler so
+      // the finger can draw, select, move, etc.
+      if (activeTool === "hand") {
+        panning = true;
+        panStart = { x: e.touches[0].clientX, y: e.touches[0].clientY, vpx: vp.x, vpy: vp.y };
+        return;
+      }
+      touchDrawing = true;
+      twoFingerActive = false;
+      onMouseDown(synthFromTouch(e.touches[0], e));
+      return;
+    }
+
+    if (e.touches.length >= 2) {
+      // If we started a single-finger draw, cancel it so the second finger
+      // can initiate pan/zoom cleanly.
+      if (touchDrawing) {
+        onMouseUp(synthFromTouch(e.touches[0], e));
+        touchDrawing = false;
+      }
+      twoFingerActive = true;
+      const [a, b] = [e.touches[0], e.touches[1]];
+      twoFingerLast = {
+        cx: (a.clientX + b.clientX) / 2,
+        cy: (a.clientY + b.clientY) / 2,
+        dist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+      };
     }
   }
+
   function onTouchMove(e) {
     if (isStylusTouch(e)) return;
     e.preventDefault();
-    if (e.touches.length === 1 && panning) {
+
+    // Hand-tool single-finger pan.
+    if (!touchDrawing && !twoFingerActive && panning && e.touches.length === 1) {
       vp.x = panStart.vpx + (e.touches[0].clientX - panStart.x);
       vp.y = panStart.vpy + (e.touches[0].clientY - panStart.y);
       render();
-    } else if (e.touches.length === 2) {
-      const dist = Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-      if (lastTouchDist) {
-        const factor = dist / lastTouchDist;
-        const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-        const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      return;
+    }
+
+    // Single-finger drawing/selecting/etc.
+    if (touchDrawing && e.touches.length === 1) {
+      onMouseMove(synthFromTouch(e.touches[0], e));
+      return;
+    }
+
+    // Two-finger pan + pinch-zoom.
+    if (twoFingerActive && e.touches.length >= 2 && twoFingerLast) {
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const cx = (a.clientX + b.clientX) / 2;
+      const cy = (a.clientY + b.clientY) / 2;
+      const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      // Pan by centroid delta.
+      vp.x += cx - twoFingerLast.cx;
+      vp.y += cy - twoFingerLast.cy;
+      // Pinch-zoom around centroid.
+      if (twoFingerLast.dist > 0) {
+        const factor = dist / twoFingerLast.dist;
         const rect = canvas.getBoundingClientRect();
         const px = cx - rect.left, py = cy - rect.top;
         const newScale = Math.max(0.1, Math.min(10, vp.scale * factor));
@@ -2532,11 +2591,29 @@
         vp.y = py - (py - vp.y) * (newScale / vp.scale);
         vp.scale = newScale;
       }
-      lastTouchDist = dist;
+      twoFingerLast = { cx, cy, dist };
       render();
     }
   }
-  function onTouchEnd(e) { panning = false; lastTouchDist = 0; }
+
+  function onTouchEnd(e) {
+    if (isStylusTouch(e)) return;
+    // Finish any single-finger drawing on last-finger-up.
+    if (touchDrawing && e.touches.length === 0) {
+      // Use changedTouches to get the released touch's position.
+      const t = e.changedTouches && e.changedTouches[0];
+      if (t) onMouseUp(synthFromTouch(t, e));
+      else onMouseUp({ button: 0, clientX: 0, clientY: 0, shiftKey: false, preventDefault: () => {}, stopPropagation: () => {} });
+      touchDrawing = false;
+    }
+    if (twoFingerActive && e.touches.length < 2) {
+      twoFingerActive = false;
+      twoFingerLast = null;
+    }
+    if (e.touches.length === 0) {
+      panning = false;
+    }
+  }
 
   // ── Pan helpers ───────────────────────────────────────────────────────────
   function startPan(e) {
