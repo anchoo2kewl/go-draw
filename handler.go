@@ -140,6 +140,8 @@ func (d *Draw) routes() http.Handler {
 				d.handleEditor(w, r, id)
 			case "data":
 				d.handleData(w, r, id)
+			case "export.svg":
+				d.handleExportSVG(w, r, id)
 			case "save":
 				if r.Method == http.MethodPost {
 					d.handleSave(w, r, id)
