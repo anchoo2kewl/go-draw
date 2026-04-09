@@ -14,14 +14,23 @@ import (
 //go:embed static
 var staticFS embed.FS
 
-// canvasHash is a short content-hash of canvas.js computed at init time.
-// Appended as ?v=<hash> to the script URL for cache-busting.
-var canvasHash string
+// canvasHash and collabHash are short content-hashes of the script files
+// computed at init time. Each is appended as ?v=<hash> to its own script
+// URL so a change to either file independently busts the browser cache.
+var (
+	canvasHash string
+	collabHash string
+)
 
 func init() {
-	data, _ := staticFS.ReadFile("static/canvas.js")
-	h := sha256.Sum256(data)
-	canvasHash = fmt.Sprintf("%x", h[:4])
+	if data, err := staticFS.ReadFile("static/canvas.js"); err == nil {
+		h := sha256.Sum256(data)
+		canvasHash = fmt.Sprintf("%x", h[:4])
+	}
+	if data, err := staticFS.ReadFile("static/collab.js"); err == nil {
+		h := sha256.Sum256(data)
+		collabHash = fmt.Sprintf("%x", h[:4])
+	}
 }
 
 // FaviconSVG returns the raw bytes of the embedded favicon SVG.
@@ -33,6 +42,9 @@ func FaviconSVG() []byte {
 // CanvasHash returns a short content-hash of the embedded canvas.js. Useful
 // for cache-busting the script URL on pages that embed the canvas directly.
 func CanvasHash() string { return canvasHash }
+
+// CollabHash returns the cache-busting hash for collab.js.
+func CollabHash() string { return collabHash }
 
 // canvasTmpl inlines the drawing page. It loads canvas.js from the static
 // directory and passes the mode ("edit" | "view") and drawing id to JS.
@@ -59,19 +71,20 @@ html,body{width:100%;height:100%;overflow:hidden;background:#f4f4f5}
     collabEnabled: {{.CollabEnabled | js}}
   };
 </script>
-<script data-cfasync="false" src="{{.BasePath}}/static/canvas.js?v={{.Version}}"></script>
-{{if eq .CollabEnabled "true"}}<script data-cfasync="false" src="{{.BasePath}}/static/collab.js?v={{.Version}}"></script>{{end}}
+<script data-cfasync="false" src="{{.BasePath}}/static/canvas.js?v={{.CanvasVersion}}"></script>
+{{if eq .CollabEnabled "true"}}<script data-cfasync="false" src="{{.BasePath}}/static/collab.js?v={{.CollabVersion}}"></script>{{end}}
 </body>
 </html>`))
 
 func serveCanvas(w http.ResponseWriter, r *http.Request, id, basePath, mode string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	canvasTmpl.Execute(w, map[string]string{
 		"Mode":          mode,
 		"ID":            id,
 		"BasePath":      basePath,
-		"Version":       canvasHash,
+		"CanvasVersion": canvasHash,
+		"CollabVersion": collabHash,
 		"CollabEnabled": "false",
 	})
 }
@@ -79,12 +92,13 @@ func serveCanvas(w http.ResponseWriter, r *http.Request, id, basePath, mode stri
 // serveCanvasWithCollab serves the canvas page with collaboration enabled.
 func serveCanvasWithCollab(w http.ResponseWriter, r *http.Request, id, basePath, mode string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	canvasTmpl.Execute(w, map[string]string{
 		"Mode":          mode,
 		"ID":            id,
 		"BasePath":      basePath,
-		"Version":       canvasHash,
+		"CanvasVersion": canvasHash,
+		"CollabVersion": collabHash,
 		"CollabEnabled": "true",
 	})
 }
