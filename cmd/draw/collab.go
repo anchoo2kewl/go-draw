@@ -112,12 +112,17 @@ func (cs *CollabServer) handleWS(ws *websocket.Conn) {
 		}
 	}()
 
-	// Reader loop — relay messages
+	// Reader loop — relay messages. A read deadline bounds how long a dead
+	// client can hold a slot in the room; the client sends a "ping" every
+	// 25s so a real connection renews the deadline well within the window.
+	const idleTimeout = 60 * time.Second
+	_ = ws.SetReadDeadline(time.Now().Add(idleTimeout))
 	for {
 		var raw string
 		if err := websocket.Message.Receive(ws, &raw); err != nil {
 			break
 		}
+		_ = ws.SetReadDeadline(time.Now().Add(idleTimeout))
 
 		var msg wsMessage
 		if err := json.Unmarshal([]byte(raw), &msg); err != nil {
@@ -127,6 +132,8 @@ func (cs *CollabServer) handleWS(ws *websocket.Conn) {
 		msg.From = peerID
 
 		switch msg.Type {
+		case "ping":
+			// Heartbeat — just keeps the read deadline alive. No relay.
 		case "cursor", "element_update", "scene_sync", "signal":
 			// Relay encrypted payload to all other peers (or specific peer)
 			relayed, _ := json.Marshal(msg)

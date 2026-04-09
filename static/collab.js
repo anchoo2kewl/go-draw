@@ -130,6 +130,9 @@
       switch (msg.type) {
         case "welcome":
           myPeerId = msg.peerId;
+          // Clear any stale peers from a previous connection so reconnects
+          // don't accumulate duplicate pills.
+          peers.clear();
           for (const p of msg.peers || []) {
             if (p.id !== myPeerId) {
               peers.set(p.id, { name: p.name, color: peerColor(p.id), cursor: null });
@@ -183,13 +186,29 @@
     };
 
     ws.onclose = () => {
+      // Drop stale peers so the presence bar doesn't linger with ghosts
+      // while we're disconnected.
+      peers.clear();
+      updatePresenceBar();
       scheduleReconnect();
     };
 
     ws.onerror = () => {
       ws.close();
     };
+
+    // Heartbeat: the server closes idle sockets after a grace period, so we
+    // send a ping every 25s to keep our own socket alive. This also lets
+    // the server detect dead peers quickly and clean them up.
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      if (ws && ws.readyState === 1) {
+        try { ws.send(JSON.stringify({ type: "ping" })); } catch (_) {}
+      }
+    }, 25000);
   }
+
+  let heartbeatTimer = null;
 
   function scheduleReconnect() {
     if (reconnectTimer) return;
