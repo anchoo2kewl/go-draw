@@ -74,8 +74,8 @@ func main() {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-cache")
-		canvasTmpl.Execute(w, nil)
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		canvasTmpl.Execute(w, map[string]string{"Version": godraw.CanvasHash()})
 	})
 
 	log.Printf("go-draw listening on :%s", port)
@@ -105,6 +105,6 @@ html,body{width:100%;height:100%;overflow:hidden;background:#f4f4f5}
     storage:  "local"
   };
 </script>
-<script data-cfasync="false" src="/draw/static/canvas.js"></script>
+<script data-cfasync="false" src="/draw/static/canvas.js?v={{.Version}}"></script>
 </body>
 </html>`))

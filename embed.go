@@ -30,6 +30,10 @@ func FaviconSVG() []byte {
 	return data
 }
 
+// CanvasHash returns a short content-hash of the embedded canvas.js. Useful
+// for cache-busting the script URL on pages that embed the canvas directly.
+func CanvasHash() string { return canvasHash }
+
 // canvasTmpl inlines the drawing page. It loads canvas.js from the static
 // directory and passes the mode ("edit" | "view") and drawing id to JS.
 var canvasTmpl = template.Must(template.New("canvas").Parse(`<!DOCTYPE html>
