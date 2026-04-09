@@ -20,9 +20,30 @@
   ];
 
   // ── State ───────────────────────────────────────────────────────────────
+  // LOTR-inspired display names. We pick one at random for users who don't
+  // set their own, so peers always see something memorable instead of
+  // "Anonymous".
+  const LOTR_NAMES = [
+    "Aragorn", "Gandalf", "Frodo", "Samwise", "Legolas", "Gimli",
+    "Boromir", "Faramir", "Eowyn", "Arwen", "Galadriel", "Elrond",
+    "Bilbo", "Pippin", "Merry", "Theoden", "Eomer", "Treebeard",
+    "Thranduil", "Tauriel", "Celeborn", "Glorfindel", "Radagast",
+    "Beorn", "Bard", "Thorin", "Balin", "Dwalin", "Kili", "Fili",
+    "Bombur", "Bifur", "Bofur", "Oin", "Gloin", "Ori", "Nori", "Dori",
+    "Shadowfax", "Goldberry", "Tom Bombadil", "Halbarad", "Imrahil",
+    "Beregond", "Erestor", "Cirdan", "Earendil", "Elendil", "Isildur",
+  ];
+  function randomLotrName() {
+    return LOTR_NAMES[Math.floor(Math.random() * LOTR_NAMES.length)];
+  }
+
   let ws = null;
   let myPeerId = "";
   let myName = localStorage.getItem("godraw-collab-name") || "";
+  if (!myName) {
+    myName = randomLotrName();
+    localStorage.setItem("godraw-collab-name", myName);
+  }
   let cryptoKey = null;
   let peers = new Map(); // id -> { name, color, cursor: {x, y} }
   let lastCursorSend = 0;
@@ -351,10 +372,8 @@
     });
   }
 
-  // Auto-connect if collab is enabled. Prompt for name first if we don't
-  // have one yet so peers see a real name instead of "Anonymous".
-  (async function init() {
-    if (!myName) await promptForName();
-    connect();
-  })();
+  // Auto-connect if collab is enabled. We already assigned a random LOTR
+  // name above, so the user is never forced through a prompt — they can
+  // click their pill in the corner if they want to rename themselves.
+  connect();
 })();
