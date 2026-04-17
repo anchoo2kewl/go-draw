@@ -50,6 +50,67 @@
     });
     container.appendChild(iframe);
 
+    // ── Hover-to-interact overlay ─────────────────────────────────────
+    // Blocks pointer events on the iframe until the user hovers for 3s,
+    // preventing accidental scroll-trap when scrolling past the embed.
+    const INTERACT_DELAY = 3; // seconds
+    const interactOverlay = document.createElement("div");
+    interactOverlay.className = "godraw-interact-overlay";
+    interactOverlay.innerHTML =
+      '<span class="godraw-interact-hint">' +
+        '<svg class="godraw-interact-spinner" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8"/></svg>' +
+        '<span class="godraw-interact-text">Hover for ' + INTERACT_DELAY + 's to interact</span>' +
+      '</span>';
+    container.appendChild(interactOverlay);
+
+    let hoverTimer = null;
+    let countdownInterval = null;
+
+    interactOverlay.addEventListener("mouseenter", () => {
+      const hint = interactOverlay.querySelector(".godraw-interact-hint");
+      const textEl = interactOverlay.querySelector(".godraw-interact-text");
+      const spinner = interactOverlay.querySelector(".godraw-interact-spinner");
+      hint.classList.add("godraw-interact-counting");
+      // Animate the spinner circle over INTERACT_DELAY seconds
+      const circle = spinner.querySelector("circle");
+      circle.style.transition = "stroke-dashoffset " + INTERACT_DELAY + "s linear";
+      // Force reflow before starting animation
+      void circle.offsetWidth;
+      circle.style.strokeDashoffset = "0";
+
+      let remaining = INTERACT_DELAY;
+      textEl.textContent = "Hover for " + remaining + "s to interact";
+      countdownInterval = setInterval(() => {
+        remaining--;
+        if (remaining > 0) {
+          textEl.textContent = "Hover for " + remaining + "s to interact";
+        } else {
+          textEl.textContent = "Interactive";
+        }
+      }, 1000);
+
+      hoverTimer = setTimeout(() => {
+        interactOverlay.classList.add("godraw-interact-active");
+        clearInterval(countdownInterval);
+        countdownInterval = null;
+      }, INTERACT_DELAY * 1000);
+    });
+
+    interactOverlay.addEventListener("mouseleave", () => {
+      clearTimeout(hoverTimer);
+      clearInterval(countdownInterval);
+      hoverTimer = null;
+      countdownInterval = null;
+      interactOverlay.classList.remove("godraw-interact-active");
+      const hint = interactOverlay.querySelector(".godraw-interact-hint");
+      const textEl = interactOverlay.querySelector(".godraw-interact-text");
+      const circle = interactOverlay.querySelector(".godraw-interact-spinner circle");
+      hint.classList.remove("godraw-interact-counting");
+      textEl.textContent = "Hover for " + INTERACT_DELAY + "s to interact";
+      circle.style.transition = "none";
+      circle.style.strokeDashoffset = "50.26";
+    });
+
     // ── Drag handle (bottom-right corner) ──────────────────────────────
     const handle = document.createElement("div");
     handle.className = "godraw-resize-handle";
@@ -198,6 +259,32 @@
         cursor:ns-resize; z-index:10;
       }
       .godraw-resize-bottom:hover { background:rgba(59,130,246,0.15); border-radius:4px; }
+      .godraw-interact-overlay {
+        position:absolute; top:0; left:0; right:0; bottom:0;
+        z-index:5; cursor:default; border-radius:8px;
+        display:flex; align-items:flex-start; justify-content:center;
+        padding-top:12px;
+      }
+      .godraw-interact-overlay.godraw-interact-active { pointer-events:none; }
+      .godraw-interact-overlay.godraw-interact-active .godraw-interact-hint { opacity:0; }
+      .godraw-interact-hint {
+        display:inline-flex; align-items:center; gap:6px;
+        padding:6px 14px; border-radius:20px; font-size:13px; font-weight:500;
+        color:#d1d5db; background:rgba(55,65,81,0.9); border:none;
+        pointer-events:none; opacity:0; transition:opacity .25s;
+        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+        backdrop-filter:blur(4px);
+      }
+      .godraw-interact-overlay:hover .godraw-interact-hint { opacity:1; }
+      .godraw-interact-spinner {
+        width:16px; height:16px; flex-shrink:0;
+      }
+      .godraw-interact-spinner circle {
+        fill:none; stroke:#9ca3af; stroke-width:2;
+        stroke-dasharray:50.26; stroke-dashoffset:50.26;
+        transform:rotate(-90deg); transform-origin:center;
+      }
+      .godraw-interact-counting .godraw-interact-spinner circle { stroke:#60a5fa; }
       .dark .godraw-embed { border-color:#333; background:#1a1a2e; }
       .dark .godraw-resize-handle { background:linear-gradient(135deg, transparent 50%, #555 50%); }
     `;
