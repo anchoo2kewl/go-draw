@@ -2475,6 +2475,8 @@
     if (mod && e.key === "v") { e.preventDefault(); pasteClipboard(); }
     if (mod && e.key === "x") { e.preventDefault(); cutSelected(); }
     if (mod && e.key === "a") { e.preventDefault(); selectAll(); }
+    if (mod && e.shiftKey && (e.key === "g" || e.key === "G")) { e.preventDefault(); ungroupSelected(); }
+    else if (mod && (e.key === "g" || e.key === "G")) { e.preventDefault(); groupSelected(); }
     if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
     if (e.key === "h" || e.key === "H") setTool("hand");
     if (e.key === "v" || e.key === "V" || e.key === "1") setTool("select");
@@ -2515,7 +2517,19 @@
     const { cx, cy } = getMousePos(e);
     const { x: wx, y: wy } = canvasToWorld(cx, cy);
     const hit = [...scene.elements].reverse().find(el => hitTest(el, wx, wy));
-    if (hit && hit.type === "text") {
+    if (hit && hit.groupId) {
+      // Double-click on grouped element → select just this element (enter group).
+      selectedIds = new Set([hit.id]);
+      render();
+      // If it's also a text or shape, continue into text editing.
+      if (hit.type === "text") {
+        commitTextInput();
+        startTextInputOnElement(hit);
+      } else if (hit.type === "rect" || hit.type === "diamond" || hit.type === "ellipse") {
+        commitTextInput();
+        startTextInputOnShape(hit);
+      }
+    } else if (hit && hit.type === "text") {
       selectedIds = new Set([hit.id]);
       commitTextInput();
       startTextInputOnElement(hit);
@@ -2907,6 +2921,39 @@
 
   function selectAll() {
     selectedIds = new Set(scene.elements.map(el => el.id));
+    render();
+  }
+
+  // ── Group / Ungroup ──────────────────────────────────────────────────────
+  function groupSelected() {
+    const ids = [...selectedIds];
+    if (ids.length < 2) return;
+    snapshot();
+    const gid = "grp-" + uid();
+    for (const el of scene.elements) {
+      if (selectedIds.has(el.id)) el.groupId = gid;
+    }
+    render();
+  }
+
+  function ungroupSelected() {
+    if (selectedIds.size === 0) return;
+    snapshot();
+    // Collect all groupIds that overlap with the current selection.
+    const groupIdsToBreak = new Set();
+    for (const el of scene.elements) {
+      if (selectedIds.has(el.id) && el.groupId) {
+        groupIdsToBreak.add(el.groupId);
+      }
+    }
+    if (groupIdsToBreak.size === 0) return;
+    // Remove groupId from ALL members of those groups (not just selected ones),
+    // so the entire group is dissolved.
+    for (const el of scene.elements) {
+      if (el.groupId && groupIdsToBreak.has(el.groupId)) {
+        delete el.groupId;
+      }
+    }
     render();
   }
 
