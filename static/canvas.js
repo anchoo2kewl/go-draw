@@ -2134,7 +2134,9 @@
           const allIn = hitIds.every(id => selectedIds.has(id));
           if (allIn) hitIds.forEach(id => selectedIds.delete(id));
           else hitIds.forEach(id => selectedIds.add(id));
-        } else if (!selectedIds.has(hit.id)) {
+        } else if (!selectedIds.has(hit.id) || selectedIds.size > hitIds.length) {
+          // Click on unselected element, or click to narrow a multi-selection
+          // down to just this element/group.
           selectedIds = new Set(hitIds);
         }
         isDragging = true;
@@ -2486,17 +2488,21 @@
     if (mod && e.shiftKey && (e.key === "g" || e.key === "G")) { e.preventDefault(); ungroupSelected(); }
     else if (mod && (e.key === "g" || e.key === "G")) { e.preventDefault(); groupSelected(); }
     if (e.key === "Delete" || e.key === "Backspace") deleteSelected();
-    if (e.key === "h" || e.key === "H") setTool("hand");
-    if (e.key === "v" || e.key === "V" || e.key === "1") setTool("select");
-    if (e.key === "r" || e.key === "R" || e.key === "2") setTool("rect");
-    if (e.key === "d" || e.key === "D") setTool("diamond");
-    if (e.key === "e" || e.key === "E" || e.key === "3") setTool("ellipse");
-    if (e.key === "l" || e.key === "L" || e.key === "4") setTool("line");
-    if (e.key === "a" || e.key === "A" || e.key === "5") setTool("arrow");
-    if (e.key === "p" || e.key === "P" || e.key === "6") setTool("pencil");
-    if (e.key === "t" || e.key === "T" || e.key === "7") setTool("text");
-    if (e.key === "x" || e.key === "X" || e.key === "8") setTool("eraser");
-    if (e.key === "i" || e.key === "I" || e.key === "9") setTool("image");
+    // Tool shortcuts only fire when no modifier key (Ctrl/Cmd) is held,
+    // so they don't conflict with Ctrl+A (select all), Ctrl+D (duplicate), etc.
+    if (!mod) {
+      if (e.key === "h" || e.key === "H") setTool("hand");
+      if (e.key === "v" || e.key === "V" || e.key === "1") setTool("select");
+      if (e.key === "r" || e.key === "R" || e.key === "2") setTool("rect");
+      if (e.key === "d" || e.key === "D") setTool("diamond");
+      if (e.key === "e" || e.key === "E" || e.key === "3") setTool("ellipse");
+      if (e.key === "l" || e.key === "L" || e.key === "4") setTool("line");
+      if (e.key === "a" || e.key === "A" || e.key === "5") setTool("arrow");
+      if (e.key === "p" || e.key === "P" || e.key === "6") setTool("pencil");
+      if (e.key === "t" || e.key === "T" || e.key === "7") setTool("text");
+      if (e.key === "x" || e.key === "X" || e.key === "8") setTool("eraser");
+      if (e.key === "i" || e.key === "I" || e.key === "9") setTool("image");
+    }
     if (e.key === "0") setTool("select"); // 0 = quick back to select
     if (e.key === "Escape") { commitTextInput(); selectedIds.clear(); render(); }
     if (e.key === "F11") { e.preventDefault(); toggleFullscreen(); }
