@@ -449,6 +449,12 @@
           <button class="sb-btn sb-action" data-action="copy-link" title="Copy link">
             <svg width="16" height="16" viewBox="0 0 16 16"><path d="M6.354 8.854a3.5 3.5 0 004.95 0l2-2a3.5 3.5 0 00-4.95-4.95l-1 1m2.292 4.242a3.5 3.5 0 00-4.95 0l-2 2a3.5 3.5 0 004.95 4.95l1-1" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg>
           </button>
+          <button class="sb-btn sb-action" data-action="group" title="Group (Ctrl+G)">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="1.5" width="5" height="5" rx="1" stroke-dasharray="2 1.5"/><rect x="9.5" y="1.5" width="5" height="5" rx="1" stroke-dasharray="2 1.5"/><rect x="1.5" y="9.5" width="5" height="5" rx="1" stroke-dasharray="2 1.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="1" stroke-dasharray="2 1.5"/><rect x="3" y="3" width="10" height="10" rx="1.5" stroke-width="1.5"/></svg>
+          </button>
+          <button class="sb-btn sb-action" data-action="ungroup" title="Ungroup (Ctrl+Shift+G)">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+          </button>
         </div>
       </div>
       <div class="sb-section" id="font-section" style="display:none">
@@ -579,6 +585,8 @@
           case "duplicate": duplicateSelected(); break;
           case "delete": deleteSelected(); break;
           case "copy-link": copyLink(); break;
+          case "group": groupSelected(); break;
+          case "ungroup": ungroupSelected(); break;
         }
       });
     });
