@@ -163,6 +163,41 @@ func (d *Draw) routes() http.Handler {
 	})
 }
 
+// ensureElementIDs assigns a random ID to any scene element that lacks one.
+// This prevents selection bugs in the canvas editor when elements share
+// id=undefined (all appear selected at once).
+func ensureElementIDs(raw json.RawMessage) json.RawMessage {
+	var scene struct {
+		Version  int               `json:"version"`
+		Elements []json.RawMessage `json:"elements"`
+	}
+	if err := json.Unmarshal(raw, &scene); err != nil {
+		return raw // not a valid scene — return as-is
+	}
+	changed := false
+	for i, elRaw := range scene.Elements {
+		var el map[string]any
+		if err := json.Unmarshal(elRaw, &el); err != nil {
+			continue
+		}
+		id, _ := el["id"].(string)
+		if id == "" {
+			el["id"] = newID()
+			changed = true
+			if b, err := json.Marshal(el); err == nil {
+				scene.Elements[i] = b
+			}
+		}
+	}
+	if !changed {
+		return raw
+	}
+	if b, err := json.Marshal(scene); err == nil {
+		return b
+	}
+	return raw
+}
+
 // ── List ─────────────────────────────────────────────────────────────────────
 
 var listTmpl = template.Must(template.New("list").Parse(`<!DOCTYPE html>
@@ -275,7 +310,7 @@ func (d *Draw) handleAPINew(w http.ResponseWriter, r *http.Request) {
 		Title:     title,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
-		Scene:     scene,
+		Scene:     ensureElementIDs(scene),
 	}
 	if err := d.store.Save(drawing); err != nil {
 		http.Error(w, "could not create drawing: "+err.Error(), http.StatusInternalServerError)
@@ -345,7 +380,7 @@ func (d *Draw) handleSave(w http.ResponseWriter, r *http.Request, id string) {
 	}
 
 	existing.Title = req.Title
-	existing.Scene = req.Scene
+	existing.Scene = ensureElementIDs(req.Scene)
 	existing.UpdatedAt = time.Now()
 
 	if err := d.store.Save(existing); err != nil {

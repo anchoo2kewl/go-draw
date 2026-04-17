@@ -3428,6 +3428,10 @@
       }
       title = data.title || "Untitled";
       scene = typeof data.scene === "string" ? JSON.parse(data.scene) : (data.scene || { version: 1, elements: [] });
+      // Ensure every element has a unique ID (legacy scenes or API-created ones may lack them).
+      for (const el of scene.elements) {
+        if (!el.id) el.id = uid();
+      }
       if (IS_EDIT) {
         const ti = document.getElementById("title-input");
         if (ti) ti.value = title;
