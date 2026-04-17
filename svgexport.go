@@ -267,9 +267,7 @@ func writeElementSVG(b *strings.Builder, el svgElement) {
 		b.WriteByte('\n')
 		if el.Text != "" {
 			bx, by, bw, bh := elementBBox(el)
-			fmt.Fprintf(b, `  <text x="%s" y="%s" text-anchor="middle" dominant-baseline="central" font-size="%s" font-family="%s" fill="%s" opacity="%s"%s>%s</text>`,
-				f(bx+bw/2), f(by+bh/2), f(fs), ff, escAttr(stroke), f(op), rot, escText(el.Text))
-			b.WriteByte('\n')
+			writeShapeText(b, el.Text, bx, by, bw, bh, fs, ff, stroke, op, rot)
 		}
 	case "diamond":
 		dcx := el.X + el.W/2
@@ -279,9 +277,8 @@ func writeElementSVG(b *strings.Builder, el svgElement) {
 			escAttr(fill), escAttr(stroke), f(sw), f(op), dash, rot)
 		b.WriteByte('\n')
 		if el.Text != "" {
-			fmt.Fprintf(b, `  <text x="%s" y="%s" text-anchor="middle" dominant-baseline="central" font-size="%s" font-family="%s" fill="%s" opacity="%s"%s>%s</text>`,
-				f(dcx), f(dcy), f(fs), ff, escAttr(stroke), f(op), rot, escText(el.Text))
-			b.WriteByte('\n')
+			bx, by, bw, bh := elementBBox(el)
+			writeShapeText(b, el.Text, bx, by, bw, bh, fs, ff, stroke, op, rot)
 		}
 	case "ellipse":
 		cx := el.X + el.W/2
@@ -292,9 +289,8 @@ func writeElementSVG(b *strings.Builder, el svgElement) {
 			f(cx), f(cy), f(rx), f(ry), escAttr(fill), escAttr(stroke), f(sw), f(op), dash, rot)
 		b.WriteByte('\n')
 		if el.Text != "" {
-			fmt.Fprintf(b, `  <text x="%s" y="%s" text-anchor="middle" dominant-baseline="central" font-size="%s" font-family="%s" fill="%s" opacity="%s"%s>%s</text>`,
-				f(cx), f(cy), f(fs), ff, escAttr(stroke), f(op), rot, escText(el.Text))
-			b.WriteByte('\n')
+			bx, by, bw, bh := elementBBox(el)
+			writeShapeText(b, el.Text, bx, by, bw, bh, fs, ff, stroke, op, rot)
 		}
 	case "line":
 		if len(el.Pts) > 1 {
@@ -381,6 +377,25 @@ func writeElementSVG(b *strings.Builder, el svgElement) {
 				escAttr(el.Src), f(el.X), f(el.Y), f(el.W), f(el.H), f(op), rot)
 			b.WriteByte('\n')
 		}
+	}
+}
+
+// writeShapeText renders multiline text inside a shape (rect, diamond,
+// ellipse). Each line is a separate <text> element, vertically centred
+// within the bounding box and clipped to its boundaries.
+func writeShapeText(b *strings.Builder, text string, bx, by, bw, bh, fs float64, ff, stroke string, op float64, rot string) {
+	lines := strings.Split(text, "\n")
+	lh := fs * 1.3
+	totalH := float64(len(lines)) * lh
+	// Vertical start so the block is centred in the box.
+	startY := by + bh/2 - totalH/2 + fs*0.85
+	anchor := "middle"
+	cx := bx + bw/2
+	for i, line := range lines {
+		ly := startY + float64(i)*lh
+		fmt.Fprintf(b, `  <text x="%s" y="%s" text-anchor="%s" font-size="%s" font-family="%s" fill="%s" opacity="%s"%s>%s</text>`,
+			f(cx), f(ly), anchor, f(fs), ff, escAttr(stroke), f(op), rot, escText(line))
+		b.WriteByte('\n')
 	}
 }
 
