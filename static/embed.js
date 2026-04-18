@@ -90,18 +90,19 @@
       }, 1000);
 
       hoverTimer = setTimeout(() => {
-        interactOverlay.classList.add("godraw-interact-active");
+        interactOverlay.style.display = "none";
         clearInterval(countdownInterval);
         countdownInterval = null;
       }, INTERACT_DELAY * 1000);
     });
 
-    interactOverlay.addEventListener("mouseleave", () => {
+    // Re-enable overlay when mouse leaves the entire container (not just the overlay).
+    container.addEventListener("mouseleave", () => {
       clearTimeout(hoverTimer);
       clearInterval(countdownInterval);
       hoverTimer = null;
       countdownInterval = null;
-      interactOverlay.classList.remove("godraw-interact-active");
+      interactOverlay.style.display = "flex";
       const hint = interactOverlay.querySelector(".godraw-interact-hint");
       const textEl = interactOverlay.querySelector(".godraw-interact-text");
       const circle = interactOverlay.querySelector(".godraw-interact-spinner circle");
