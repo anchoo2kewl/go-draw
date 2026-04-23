@@ -1188,12 +1188,19 @@
     const totalH = lines.length * lineHeight;
     const lineBoxTop = bb.y + bb.h / 2 - totalH / 2;
     const baseline0 = lineBoxTop + cssM.baseline;
+    // Clip text to shape boundary so it doesn't overflow
+    ctx.save();
+    ctx.beginPath();
+    const pad = 4;
+    ctx.rect(bb.x + pad, bb.y + pad, bb.w - pad * 2, bb.h - pad * 2);
+    ctx.clip();
     lines.forEach((line, i) => {
       let tx = bb.x + bb.w / 2;
       if (align === "left") tx = bb.x + 8;
       else if (align === "right") tx = bb.x + bb.w - 8;
       ctx.fillText(line, tx, baseline0 + i * lineHeight);
     });
+    ctx.restore();
     ctx.textAlign = "start";
   }
 
