@@ -30,7 +30,7 @@
   let textAlign = "center";     // "left" | "center" | "right"
   let strokeStyle = "solid";   // "solid" | "dashed" | "dotted"
   let fillStyle = "hachure";   // "hachure" | "cross-hatch" | "solid"
-  let roughness = 0;           // 0=architect, 1=artist, 2=cartoonist
+  let roughness = 1;           // continuous 0..2; 0=clean, ~1=hand-drawn, 2=very sketchy
   let roundness = "sharp";     // "sharp" | "round"
   let opacity = 100;           // 0-100
 
@@ -390,16 +390,9 @@
       </div>
       <div class="sb-section">
         <div class="sb-label">Sloppiness</div>
-        <div class="sb-row" id="rg-btns">
-          <button class="sb-btn" data-prop="roughness" data-val="0" title="Architect">
-            <svg width="20" height="20" viewBox="0 0 20 20"><line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-          </button>
-          <button class="sb-btn" data-prop="roughness" data-val="1" title="Artist">
-            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 10Q7 8 10 10Q13 12 17 10" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
-          </button>
-          <button class="sb-btn" data-prop="roughness" data-val="2" title="Cartoonist">
-            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M3 10Q5 7 7 10Q9 13 11 10Q13 7 15 10Q16 12 17 10" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
-          </button>
+        <div class="sb-row">
+          <input type="range" id="rg-slider" min="0" max="2" step="0.1" value="1" title="Drag to control how rough the strokes are. 0 = smooth, 2 = very sketchy.">
+          <span id="rg-val">1.0</span>
         </div>
       </div>
       <div class="sb-section">
@@ -557,9 +550,11 @@
       btn.addEventListener("click", () => setProp("fillStyle", btn.dataset.val));
     });
 
-    // Roughness
-    sb.querySelectorAll("#rg-btns .sb-btn").forEach(btn => {
-      btn.addEventListener("click", () => setProp("roughness", parseInt(btn.dataset.val)));
+    // Roughness slider
+    sb.querySelector("#rg-slider").addEventListener("input", e => {
+      const v = parseFloat(e.target.value);
+      sb.querySelector("#rg-val").textContent = v.toFixed(1);
+      setProp("roughness", v);
     });
 
     // Roundness
@@ -824,7 +819,7 @@
 
       /* Opacity slider */
       #sidebar input[type=range] { flex:1; height:4px; accent-color:#1e1e2e; cursor:pointer; }
-      #opacity-val { font-size:0.72rem; color:#555; min-width:24px; text-align:right; }
+      #opacity-val, #rg-val { font-size:0.72rem; color:#555; min-width:24px; text-align:right; }
 
       /* Font size select */
       #sidebar select { font-size:0.8rem; border:1px solid #ddd; border-radius:4px; padding:3px 6px; width:100%; cursor:pointer; }
@@ -930,8 +925,8 @@
         #sidebar input[type=color] { width:18px; height:18px; }
         .sb-btn { width:28px; height:24px; }
         #sidebar select { width:40px; font-size:0.7rem; }
-        #opacity-slider { width:36px; }
-        #opacity-val { display:none; }
+        #opacity-slider, #rg-slider { width:36px; }
+        #opacity-val, #rg-val { display:none; }
         #sidebar .sb-action[data-action="copy-link"] { display:none; }
       }
     `;
@@ -981,16 +976,43 @@
     };
   }
 
+  // roughPasses — number of overlapping strokes to draw. 0 means clean line.
+  // Light roughness gets a single rough stroke; heavier roughness gets a
+  // double-traced sketchy look.
+  function roughPasses(rough) {
+    if (rough <= 0) return 0;
+    if (rough < 1.3) return 1;
+    return 2;
+  }
+
   function roughLine(ctx, x1, y1, x2, y2, rough, rng) {
     const len = Math.hypot(x2 - x1, y2 - y1);
     if (len < 0.1) return;
-    const amp = rough * Math.min(len * 0.05, 3.5);
-    const dx = x2 - x1, dy = y2 - y1;
-    const nx = -dy / len, ny = dx / len;
-    const cpx = (x1 + x2) / 2 + nx * (rng() - 0.5) * amp * 2;
-    const cpy = (y1 + y2) / 2 + ny * (rng() - 0.5) * amp * 2;
-    ctx.moveTo(x1 + (rng() - 0.5) * amp * 0.5, y1 + (rng() - 0.5) * amp * 0.5);
-    ctx.quadraticCurveTo(cpx, cpy, x2 + (rng() - 0.5) * amp * 0.5, y2 + (rng() - 0.5) * amp * 0.5);
+    if (rough <= 0) {
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      return;
+    }
+    const amp = rough * Math.min(len * 0.04, 3);
+    const nx = -(y2 - y1) / len, ny = (x2 - x1) / len;
+    const jitter = amp * 0.5;
+    const sx = x1 + (rng() - 0.5) * jitter;
+    const sy = y1 + (rng() - 0.5) * jitter;
+    const ex = x2 + (rng() - 0.5) * jitter;
+    const ey = y2 + (rng() - 0.5) * jitter;
+    // Multiple bends on long edges; one bend on short edges.
+    const segments = len < 50 ? 1 : len < 140 ? 2 : 3;
+    ctx.moveTo(sx, sy);
+    let px = sx, py = sy;
+    for (let i = 1; i <= segments; i++) {
+      const t = i / segments;
+      const tx = sx + (ex - sx) * t;
+      const ty = sy + (ey - sy) * t;
+      const cpx = (px + tx) / 2 + nx * (rng() - 0.5) * amp * 2;
+      const cpy = (py + ty) / 2 + ny * (rng() - 0.5) * amp * 2;
+      ctx.quadraticCurveTo(cpx, cpy, tx, ty);
+      px = tx; py = ty;
+    }
   }
 
   function roughEllipse(ctx, cx, cy, rx, ry, rough, rng) {
@@ -1260,7 +1282,8 @@
       const x0 = Math.min(x, x + w), y0 = Math.min(y, y + h);
       const x1 = Math.max(x, x + w), y1 = Math.max(y, y + h);
       const seed = hashCode(el.id);
-      for (let pass = 0; pass < 2; pass++) {
+      const passes = roughPasses(r);
+      for (let pass = 0; pass < passes; pass++) {
         const rng = seededRandom(seed + pass * 1000);
         ctx.beginPath();
         roughLine(ctx, x0, y0, x1, y0, r, rng);
@@ -1292,7 +1315,8 @@
       ctx.stroke();
     } else {
       const seed = hashCode(el.id);
-      for (let pass = 0; pass < 2; pass++) {
+      const passes = roughPasses(r);
+      for (let pass = 0; pass < passes; pass++) {
         const rng = seededRandom(seed + pass * 1000);
         ctx.beginPath();
         roughLine(ctx, cx, y, x + w, cy, r, rng);
@@ -1318,7 +1342,8 @@
       ctx.stroke();
     } else {
       const seed = hashCode(el.id);
-      for (let pass = 0; pass < 2; pass++) {
+      const passes = roughPasses(r);
+      for (let pass = 0; pass < passes; pass++) {
         const rng = seededRandom(seed + pass * 1000);
         ctx.beginPath();
         roughEllipse(ctx, cx, cy, rx, ry, r, rng);
@@ -1366,7 +1391,8 @@
     // Sample the curve into short segments and draw them as rough lines.
     const pts = sampleBezier(p0, p1, p2, 12);
     const seed = hashCode(el.id);
-    for (let pass = 0; pass < 2; pass++) {
+    const passes = roughPasses(r);
+    for (let pass = 0; pass < passes; pass++) {
       const rng = seededRandom(seed + pass * 1000);
       ctx.beginPath();
       for (let i = 1; i < pts.length; i++) roughLine(ctx, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y, r, rng);
@@ -1390,7 +1416,8 @@
         ctx.stroke();
       } else {
         const seed = hashCode(el.id);
-        for (let pass = 0; pass < 2; pass++) {
+        const passes = roughPasses(r);
+        for (let pass = 0; pass < passes; pass++) {
           const rng = seededRandom(seed + pass * 1000);
           ctx.beginPath();
           for (let i = 1; i < el.pts.length; i++) roughLine(ctx, el.pts[i-1].x, el.pts[i-1].y, el.pts[i].x, el.pts[i].y, r, rng);
@@ -1406,7 +1433,8 @@
       ctx.stroke();
     } else {
       const seed = hashCode(el.id);
-      for (let pass = 0; pass < 2; pass++) {
+      const passes = roughPasses(r);
+      for (let pass = 0; pass < passes; pass++) {
         const rng = seededRandom(seed + pass * 1000);
         ctx.beginPath();
         roughLine(ctx, el.x, el.y, el.x2, el.y2, r, rng);
@@ -1451,7 +1479,8 @@
         ctx.stroke();
       } else {
         const seed = hashCode(el.id);
-        for (let pass = 0; pass < 2; pass++) {
+        const passes = roughPasses(r);
+        for (let pass = 0; pass < passes; pass++) {
           const rng = seededRandom(seed + pass * 1000);
           ctx.beginPath();
           for (let i = 1; i < el.pts.length; i++) roughLine(ctx, el.pts[i-1].x, el.pts[i-1].y, el.pts[i].x, el.pts[i].y, r, rng);
@@ -1471,7 +1500,8 @@
         ctx.stroke();
       } else {
         const seed = hashCode(el.id);
-        for (let pass = 0; pass < 2; pass++) {
+        const passes = roughPasses(r);
+        for (let pass = 0; pass < passes; pass++) {
           const rng = seededRandom(seed + pass * 1000);
           ctx.beginPath();
           roughLine(ctx, el.x, el.y, el.x2, el.y2, r, rng);
@@ -2813,10 +2843,12 @@
       b.classList.toggle("active", b.dataset.val === fls);
     });
 
-    // Roughness
-    sb.querySelectorAll("#rg-btns .sb-btn").forEach(b => {
-      b.classList.toggle("active", parseInt(b.dataset.val) === rg);
-    });
+    // Roughness slider
+    const rgSlider = sb.querySelector("#rg-slider");
+    if (rgSlider) {
+      rgSlider.value = rg;
+      sb.querySelector("#rg-val").textContent = Number(rg).toFixed(1);
+    }
 
     // Roundness
     sb.querySelectorAll("#rn-btns .sb-btn").forEach(b => {
@@ -2858,7 +2890,7 @@
     const isImageTool = activeTool === "image" || (sel && sel.type === "image");
     const hideStrokeFill = isEraserNoSel || isImageTool;
 
-    for (const id of ["stroke-swatches", "fill-swatches", "sw-btns", "ss-btns", "rg-btns", "rn-btns"]) {
+    for (const id of ["stroke-swatches", "fill-swatches", "sw-btns", "ss-btns", "rg-slider", "rn-btns"]) {
       const section = sb.querySelector("#" + id);
       if (section) section.closest(".sb-section").style.display = hideStrokeFill ? "none" : "";
     }

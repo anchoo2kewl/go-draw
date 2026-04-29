@@ -284,7 +284,7 @@ Every element has these fields:
 | `opacity` | number | **0–100** (not 0–1). `100` = fully opaque, `50` = half transparent |
 | `strokeWidth` | number | Stroke width in pixels (1–4) |
 | `strokeStyle` | string | `"solid"` (default), `"dashed"`, or `"dotted"` |
-| `roughness` | number | `0` = clean, `1`+ = hand-drawn style |
+| `roughness` | number | Continuous `0..2`. `0` = clean, `1` = hand-drawn (default), `2` = sketchy double-stroke |
 | `roundness` | string | `"sharp"` (default) or `"round"` (rounded corners for rects) |
 | `angle` | number | Rotation in radians (0 = no rotation) |
 
