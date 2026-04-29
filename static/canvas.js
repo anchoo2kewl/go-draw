@@ -391,8 +391,8 @@
       <div class="sb-section">
         <div class="sb-label">Sloppiness</div>
         <div class="sb-row">
-          <input type="range" id="rg-slider" min="0" max="2" step="0.1" value="1" title="Drag to control how rough the strokes are. 0 = smooth, 2 = very sketchy.">
-          <span id="rg-val">1.0</span>
+          <input type="range" id="rg-slider" min="0" max="10" step="0.1" value="5" title="Drag to control how rough the strokes are. 0 = smooth, 10 = very sketchy.">
+          <span id="rg-val">5.0</span>
         </div>
       </div>
       <div class="sb-section">
@@ -550,11 +550,12 @@
       btn.addEventListener("click", () => setProp("fillStyle", btn.dataset.val));
     });
 
-    // Roughness slider
+    // Roughness slider — UI is 0..10 for fine-grained control; element
+    // roughness stays on the 0..2 scale used by the renderer.
     sb.querySelector("#rg-slider").addEventListener("input", e => {
-      const v = parseFloat(e.target.value);
-      sb.querySelector("#rg-val").textContent = v.toFixed(1);
-      setProp("roughness", v);
+      const sv = parseFloat(e.target.value);
+      sb.querySelector("#rg-val").textContent = sv.toFixed(1);
+      setProp("roughness", sv / 5);
     });
 
     // Roundness
@@ -2843,11 +2844,12 @@
       b.classList.toggle("active", b.dataset.val === fls);
     });
 
-    // Roughness slider
+    // Roughness slider — display is on a 0..10 scale, element data is 0..2.
     const rgSlider = sb.querySelector("#rg-slider");
     if (rgSlider) {
-      rgSlider.value = rg;
-      sb.querySelector("#rg-val").textContent = Number(rg).toFixed(1);
+      const sv = Number(rg) * 5;
+      rgSlider.value = sv;
+      sb.querySelector("#rg-val").textContent = sv.toFixed(1);
     }
 
     // Roundness
